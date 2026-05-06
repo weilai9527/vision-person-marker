@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大模型人数检测</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
+</head>
+<body>
+    <main class="app-shell">
+        <header class="app-header">
+            <div class="brand">
+                <p class="eyebrow">Local YOLO Person Detection</p>
+                <h1>YOLO 人数检测</h1>
+            </div>
+            <button class="button-secondary" type="button" id="openApiButton">添加 API</button>
+        </header>
+
+        <section class="workspace">
+            <div class="surface upload-surface">
+                <div class="surface-header">
+                    <div>
+                        <h2 class="surface-title">上传图片</h2>
+                        <p>选择或拖拽一张图片，系统会使用本地 YOLO 模型检测并框选可见行人。</p>
+                    </div>
+                    <span class="api-status">本地 YOLO</span>
+                </div>
+
+                <form method="post" enctype="multipart/form-data" id="uploadForm">
+                    <label class="dropzone" id="dropzone" for="imageInput">
+                        <span class="dropzone-main">
+                            <span class="upload-mark">+</span>
+                            <strong>拖拽图片到这里</strong>
+                            <span>也可以点击选择文件，支持 jpg、jpeg、png、bmp、webp。</span>
+                        </span>
+                        <input id="imageInput" type="file" name="image" accept=".jpg,.jpeg,.png,.bmp,.webp" required>
+                    </label>
+                    <div class="file-row">
+                        <div class="file-name" id="fileName">还没有选择图片</div>
+                        <button type="submit" id="submitButton">开始检测</button>
+                    </div>
+                </form>
+            </div>
+
+            <aside class="surface preview-surface">
+                <div class="preview-head">
+                    <h2 class="surface-title">图片预览</h2>
+                    <p>上传前可先确认图片内容。</p>
+                </div>
+                <div class="preview-body">
+                    <div class="preview-empty" id="previewEmpty">等待选择图片</div>
+                    <img class="preview-image" id="previewImage" alt="待检测图片预览">
+                </div>
+            </aside>
+        </section>
+
+        {% if error %}
+        <div class="message error">{{ error }}</div>
+        {% endif %}
+
+        {% if success %}
+        <div class="message">{{ success }}</div>
+        {% endif %}
+
+        {% if person_count is not none %}
+        <section class="result">
+            <div class="surface result-summary">
+                <div class="count-label">检测人数</div>
+                <div class="count">{{ person_count }}</div>
+                <div class="result-meta">
+                    {% if original_filename %}
+                    <p>图片文件：{{ original_filename }}</p>
+                    {% endif %}
+                    {% if analysis %}
+                    <p>模型说明：{{ analysis }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="surface result-image-wrap">
+                <img src="{{ result_image_url }}" alt="上传图片">
+            </div>
+        </section>
+        {% endif %}
+    </main>
+
+    <div class="api-modal" id="apiModal" aria-hidden="true">
+        <section class="api-panel" role="dialog" aria-modal="true" aria-labelledby="apiTitle">
+            <header>
+                <h2 id="apiTitle">添加 API</h2>
+                <button class="icon-button" type="button" id="closeApiButton" aria-label="关闭">×</button>
+            </header>
+            <form method="post" id="apiForm">
+                <input type="hidden" name="action" value="save_api">
+                <div class="field">
+                    <label for="provider">服务商</label>
+                    <select id="provider" name="provider">
+                        {% for provider_id, provider in api_providers.items() %}
+                        <option
+                            value="{{ provider_id }}"
+                            data-url="{{ provider.api_url }}"
+                            data-model="{{ provider.model }}"
+                            {% if api_config.provider == provider_id %}selected{% endif %}
+                        >
+                            {{ provider.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="apiUrl">API 地址</label>
+                    <input id="apiUrl" name="api_url" type="url" value="{{ api_config.api_url }}" placeholder="https://api.openai.com/v1/chat/completions" required>
+                </div>
+                <div class="field">
+                    <label for="apiKey">API Key</label>
+                    <input id="apiKey" name="api_key" type="password" value="{{ api_config.api_key }}" placeholder="请输入 API Key" required>
+                </div>
+                <div class="field">
+                    <label for="model">模型名称</label>
+                    <input id="model" name="model" type="text" value="{{ api_config.model }}" placeholder="gpt-4o-mini" required>
+                </div>
+                <div class="form-actions">
+                    <button type="submit">保存 API</button>
+                    <button class="button-secondary" type="button" id="cancelApiButton">取消</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <script src="{{ url_for('static', filename='index.js') }}"></script>
+</body>
+</html>
