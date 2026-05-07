@@ -1,8 +1,9 @@
 @echo off
 setlocal
 
-set "PROJECT_DIR=D:\yolodemo\yolo-person-web"
-set "PYTHON_EXE=D:\yolo\yolo_env\Scripts\python.exe"
+set "PROJECT_DIR=D:\vision-person-marker\yolo-person-web"
+set "PYTHON_EXE=D:\python\python.exe"
+set "DATABASE_URL=sqlite:///D:/vision-person-marker/yolo-person-web/database/person_marker.db"
 set "LLM_TIMEOUT=180"
 set "MODEL_IMAGE_MAX_SIDE=0"
 set "BOX_EXPAND_X=0"
@@ -10,7 +11,7 @@ set "BOX_EXPAND_Y=0"
 set "ENABLE_TILE_DETECTION=0"
 set "TILE_GRID=2"
 set "TILE_OVERLAP=0.18"
-set "YOLO_MODEL_PATH=D:\yolodemo\models\yolov8s.pt"
+set "YOLO_MODEL_PATH=D:\vision-person-marker\models\yolov8s.pt"
 set "YOLO_CONF=0.25"
 set "YOLO_IOU=0.50"
 set "YOLO_IMGSZ=1280"

@@ -1,4 +1,5 @@
 import base64
+from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from io import BytesIO
 import json
@@ -8,12 +9,14 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Flask, render_template, request, url_for
+from flask import Flask, jsonify, render_template, request, url_for
 import requests
 from PIL import Image, ImageDraw, ImageOps
 from ultralytics import YOLO
 
 BASE_DIR = Path(__file__).resolve().parent
+DATABASE_DIR = BASE_DIR / "database"
+DATABASE_PATH = DATABASE_DIR / "person_marker.db"
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 RESULT_DIR = BASE_DIR / "static" / "results"
 LOG_DIR = BASE_DIR / "logs"
@@ -77,6 +80,57 @@ API_PROVIDERS = {
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+DATABASE_DIR.mkdir(parents=True, exist_ok=True)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+    "DATABASE_URL", "sqlite:///" + str(DATABASE_PATH)
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
+
+# Database Models
+class ImageRecord(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    original_filename = db.Column(db.String(255), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    original_image_path = db.Column(db.String(512), nullable=False)
+    model_image_path = db.Column(db.String(512), nullable=True)
+    original_width = db.Column(db.Integer)
+    original_height = db.Column(db.Integer)
+    model_width = db.Column(db.Integer)
+    model_height = db.Column(db.Integer)
+
+    detections = db.relationship('DetectionResult', backref='image', lazy=True)
+
+    def __repr__(self):
+        return f'<ImageRecord {self.id} - {self.original_filename}>'
+
+class DetectionResult(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    image_id = db.Column(db.Integer, db.ForeignKey('image_record.id'), nullable=False)
+    detected_at = db.Column(db.DateTime, default=datetime.utcnow)
+    person_count = db.Column(db.Integer)
+    bounding_boxes_json = db.Column(db.Text)  # Store as JSON string
+    llm_analysis_text = db.Column(db.Text)
+    result_image_path = db.Column(db.String(512))
+    llm_api_provider = db.Column(db.String(50))
+    llm_model_name = db.Column(db.String(50))
+    raw_llm_response_log_path = db.Column(db.String(512))
+
+    def __repr__(self):
+        return f'<DetectionResult {self.id} - {self.person_count} people>'
+
+# Define a simple User model
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+# Create database tables if they don't exist
+with app.app_context():
+    db.create_all()
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
@@ -607,7 +661,7 @@ def get_yolo_model():
     return _yolo_model
 
 
-def call_local_yolo(image_path: Path) -> tuple[int, str, str]:
+def call_local_yolo(image_path: Path, image_record_id: int, api_config: dict) -> tuple[int, str, str, int, int]:
     model = get_yolo_model()
 
     with Image.open(image_path) as image:
@@ -822,7 +876,23 @@ def call_vision_model(image_path: Path) -> tuple[int, str, str]:
             f"合并后成功绘制的框为 {drawn_count} 个。）"
         )
     analysis = f"{analysis}（原始返回已保存：logs/{log_name}）"
-    return person_count, analysis, result_name
+
+    detection_result = DetectionResult(
+        image_id=image_record_id,
+        person_count=person_count,
+        bounding_boxes_json=json.dumps([{
+            "x1": box["x1"], "y1": box["y1"], "x2": box["x2"], "y2": box["y2"]
+        } for box in merged_boxes]),
+        llm_analysis_text=analysis,
+        result_image_path=f"static/results/{result_name}",
+        llm_api_provider=api_config["provider"],
+        llm_model_name=api_config["model"],
+        raw_llm_response_log_path=f"logs/{log_name}",
+    )
+    db.session.add(detection_result)
+    db.session.commit()
+
+    return person_count, analysis, result_name, model_image_width, model_image_height
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -855,17 +925,34 @@ def index():
             elif not allowed_file(file.filename):
                 error = "只支持 jpg、jpeg、png、bmp、webp 格式。"
             else:
-                suffix = Path(file.filename).suffix.lower()
+                original_filename = file.filename
+                suffix = Path(original_filename).suffix.lower()
                 upload_name = f"{uuid4().hex}{suffix}"
                 upload_path = UPLOAD_DIR / upload_name
                 file.save(upload_path)
 
+                with Image.open(upload_path) as img:
+                    original_width, original_height = img.size
+
+                image_record = ImageRecord(
+                    original_filename=original_filename,
+                    original_image_path=str(upload_path),
+                    original_width=original_width,
+                    original_height=original_height,
+                )
+                db.session.add(image_record)
+                db.session.commit()
+
                 try:
-                    person_count, analysis, result_name = call_local_yolo(upload_path)
+                    person_count, analysis, result_name, model_width, model_height = call_local_yolo(upload_path, image_record.id, api_config)
+                    image_record.model_image_path = str(upload_path) # Assuming model image is the same as original for now, update if different
+                    image_record.model_width = model_width
+                    image_record.model_height = model_height
+                    db.session.commit()
                     result_image_url = url_for("static", filename=f"results/{result_name}")
-                    original_filename = file.filename
                 except Exception as exc:
                     error = f"检测失败：{exc}"
+                    db.session.rollback() # Rollback if detection fails
 
     return render_template(
         "index.html",
@@ -880,6 +967,52 @@ def index():
         original_filename=original_filename,
     )
 
+@app.route("/history")
+def history():
+    records = ImageRecord.query.order_by(ImageRecord.uploaded_at.desc()).all()
+    return render_template("history.html", records=records)
+
+
+# User CRUD operations
+@app.route("/users", methods=["POST"])
+def create_user():
+    data = request.get_json()
+    new_user = User(username=data["username"], email=data["email"])
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({"message": "User created successfully", "user": {"id": new_user.id, "username": new_user.username, "email": new_user.email}}), 201
+
+@app.route("/users", methods=["GET"])
+def get_users():
+    users = User.query.all()
+    output = []
+    for user in users:
+        output.append({"id": user.id, "username": user.username, "email": user.email})
+    return jsonify({"users": output})
+
+@app.route("/users/<int:user_id>", methods=["GET"])
+def get_user(user_id):
+    user = User.query.get_or_404(user_id)
+    return jsonify({"user": {"id": user.id, "username": user.username, "email": user.email}})
+
+@app.route("/users/<int:user_id>", methods=["PUT"])
+def update_user(user_id):
+    user = User.query.get_or_404(user_id)
+    data = request.get_json()
+    user.username = data["username"]
+    user.email = data["email"]
+    db.session.commit()
+    return jsonify({"message": "User updated successfully", "user": {"id": user.id, "username": user.username, "email": user.email}})
+
+@app.route("/users/<int:user_id>", methods=["DELETE"])
+def delete_user(user_id):
+    user = User.query.get_or_404(user_id)
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({"message": "User deleted successfully"})
+
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
     app.run(host="127.0.0.1", port=5000, debug=False)
