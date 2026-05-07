@@ -711,7 +711,20 @@ def call_local_yolo(image_path: Path, image_record_id: int, api_config: dict) ->
         f"模型：{YOLO_MODEL_PATH.name}，conf={YOLO_CONF}，iou={YOLO_IOU}，imgsz={YOLO_IMGSZ}。"
         f"共绘制 {drawn_count} 个行人框。"
     )
-    return drawn_count, analysis, result_name
+    detection_result = DetectionResult(
+        image_id=image_record_id,
+        person_count=drawn_count,
+        bounding_boxes_json=json.dumps(boxes, ensure_ascii=False),
+        llm_analysis_text=analysis,
+        result_image_path=f"static/results/{result_name}",
+        llm_api_provider=api_config.get("provider", "local_yolo"),
+        llm_model_name=YOLO_MODEL_PATH.name,
+        raw_llm_response_log_path=None,
+    )
+    db.session.add(detection_result)
+    db.session.commit()
+
+    return drawn_count, analysis, result_name, width, height
 
 
 def build_detection_prompt(width: int, height: int, scope: str = "整张图片") -> str:
@@ -877,22 +890,7 @@ def call_vision_model(image_path: Path) -> tuple[int, str, str]:
         )
     analysis = f"{analysis}（原始返回已保存：logs/{log_name}）"
 
-    detection_result = DetectionResult(
-        image_id=image_record_id,
-        person_count=person_count,
-        bounding_boxes_json=json.dumps([{
-            "x1": box["x1"], "y1": box["y1"], "x2": box["x2"], "y2": box["y2"]
-        } for box in merged_boxes]),
-        llm_analysis_text=analysis,
-        result_image_path=f"static/results/{result_name}",
-        llm_api_provider=api_config["provider"],
-        llm_model_name=api_config["model"],
-        raw_llm_response_log_path=f"logs/{log_name}",
-    )
-    db.session.add(detection_result)
-    db.session.commit()
-
-    return person_count, analysis, result_name, model_image_width, model_image_height
+    return person_count, analysis, result_name
 
 
 @app.route("/", methods=["GET", "POST"])
