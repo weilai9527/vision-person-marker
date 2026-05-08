@@ -53,6 +53,10 @@ http://127.0.0.1:5000
 
 项目的 YOLO 推理支持 GPU。当前环境如果是 CPU 版 PyTorch，程序会自动退回 CPU。要启用 GPU，需要安装和显卡驱动匹配的 CUDA 版 PyTorch，然后保持 `YOLO_DEVICE=auto` 或手动设置为 `YOLO_DEVICE=0`。
 
+```powershell
+python -m pip install --upgrade --force-reinstall -r requirements-gpu.txt
+```
+
 视频读取、绘制检测框和写出 mp4 仍由 OpenCV 处理，通常还是 CPU；速度提升主要来自 YOLO 推理阶段。
 
 可清理目录：`static/uploads/`、`static/results/`、`static/videos/`、`static/video_results/`、`instance/logs/`。
