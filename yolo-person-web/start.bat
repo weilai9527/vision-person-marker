@@ -2,8 +2,6 @@
 setlocal
 
 set "PROJECT_DIR=%~dp0"
-set "DB_PATH=%PROJECT_DIR%database\person_marker.db"
-set "DATABASE_URL=sqlite:///%DB_PATH:\=/%"
 set "LLM_TIMEOUT=180"
 set "MODEL_IMAGE_MAX_SIDE=0"
 set "BOX_EXPAND_X=0"
@@ -16,6 +14,8 @@ set "YOLO_CONF=0.25"
 set "YOLO_IOU=0.50"
 set "YOLO_IMGSZ=1280"
 set "YOLO_MIN_AREA=60"
+set "YOLO_DEVICE=auto"
+set "VIDEO_MAX_SIZE=500"
 
 cd /d "%PROJECT_DIR%"
 
@@ -30,8 +30,6 @@ if "%PYTHON_EXE%"=="" (
 
 if "%PYTHON_EXE%"=="" (
     echo [ERROR] Python not found.
-    echo.
-    echo Please install Python or add it to PATH.
     pause
     exit /b 1
 )
@@ -51,8 +49,6 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr "127.0.0.1:5000" ^| findstr "
     echo Stopping old server process %%P on port 5000...
     taskkill /PID %%P /F >nul 2>nul
 )
-
-echo.
 
 %PYTHON_EXE% app.py
 

@@ -3,93 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>历史检测记录 - 人员检测系统</title>
+    <title>历史检测记录</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
-    <style>
-        .container {
-            max-width: 1200px;
-            margin: 20px auto;
-            padding: 20px;
-            background-color: #fff;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-        .record-card {
-            border: 1px solid #eee;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-            background-color: #f9f9f9;
-            display: flex;
-            gap: 20px;
-        }
-        .record-image img {
-            max-width: 200px;
-            max-height: 200px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-        }
-        .record-details {
-            flex-grow: 1;
-        }
-        .record-details h3 {
-            margin-top: 0;
-            color: #333;
-        }
-        .record-details p {
-            margin: 5px 0;
-            color: #555;
-        }
-        .detection-item {
-            border-top: 1px dashed #ddd;
-            margin-top: 10px;
-            padding-top: 10px;
-        }
-        .detection-item:first-of-type {
-            border-top: none;
-            margin-top: 0;
-            padding-top: 0;
-        }
-    </style>
 </head>
 <body>
-    <div class="container">
-        <h1>历史检测记录</h1>
-        <p><a href="{{ url_for('index') }}">返回主页</a></p>
+    <main class="app-shell">
+        <header class="app-header">
+            <div class="brand">
+                <p class="eyebrow">Detection History</p>
+                <h1>历史检测记录</h1>
+            </div>
+            <nav class="header-actions">
+                <a href="{{ url_for('index') }}" class="button-secondary">图片检测</a>
+                <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
+            </nav>
+        </header>
 
         {% if records %}
+        <section class="history-list">
             {% for record in records %}
-                <div class="record-card">
-                    <div class="record-image">
-                        <img src="{{ url_for('static', filename='uploads/' + record.original_image_path.split('/')[-1]) }}" alt="{{ record.original_filename }}">
-                    </div>
-                    <div class="record-details">
-                        <h3>{{ record.original_filename }}</h3>
-                        <p><strong>上传时间:</strong> {{ record.uploaded_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-                        <p><strong>原始尺寸:</strong> {{ record.original_width }}x{{ record.original_height }}</p>
-                        <p><strong>模型处理尺寸:</strong> {{ record.model_width }}x{{ record.model_height }}</p>
-
-                        {% if record.detections %}
-                            <h4>检测结果:</h4>
-                            {% for detection in record.detections %}
-                                <div class="detection-item">
-                                    <p><strong>检测时间:</strong> {{ detection.detected_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-                                    <p><strong>人数:</strong> {{ detection.person_count }}</p>
-                                    <p><strong>LLM 分析:</strong> {{ detection.llm_analysis_text }}</p>
-                                    <p><img src="{{ url_for('static', filename=detection.result_image_path.split('static/')[-1]) }}" alt="检测结果" style="max-width: 150px; max-height: 150px; border: 1px solid #ddd; border-radius: 4px;"></p>
-                                    <p><strong>LLM 提供商:</strong> {{ detection.llm_api_provider }} ({{ detection.llm_model_name }})</p>
-                                    <p><a href="{{ url_for('static', filename=detection.raw_llm_response_log_path.split('logs/')[-1]) }}" target="_blank">原始LLM日志</a></p>
-                                </div>
-                            {% endfor %}
-                        {% else %}
-                            <p>暂无检测结果。</p>
-                        {% endif %}
-                    </div>
+            <article class="surface record-card" data-record-id="{{ record.id }}">
+                <div class="record-image">
+                    <img src="{{ url_for('static', filename='uploads/' + record.original_image_path.replace('\\', '/').split('/')[-1]) }}" alt="{{ record.original_filename }}">
                 </div>
+                <div class="record-details">
+                    <div class="record-title-row">
+                        <h2>{{ record.original_filename }}</h2>
+                        <button class="button-danger delete-record" type="button" data-record-id="{{ record.id }}">删除</button>
+                    </div>
+                    <p>上传时间：{{ record.uploaded_at.strftime('%Y-%m-%d %H:%M:%S') if record.uploaded_at else '-' }}</p>
+                    <p>原始尺寸：{{ record.original_width or '-' }} x {{ record.original_height or '-' }}</p>
+                    <p>模型尺寸：{{ record.model_width or '-' }} x {{ record.model_height or '-' }}</p>
+
+                    {% if record.detections %}
+                    <div class="detection-list">
+                        {% for detection in record.detections %}
+                        <div class="detection-item">
+                            <p>检测时间：{{ detection.detected_at.strftime('%Y-%m-%d %H:%M:%S') if detection.detected_at else '-' }}</p>
+                            <p>人数：{{ detection.person_count }}</p>
+                            {% if detection.llm_analysis_text %}
+                            <p>{{ detection.llm_analysis_text }}</p>
+                            {% endif %}
+                            {% if detection.result_image_path %}
+                            <img src="{{ url_for('static', filename=detection.result_image_path.replace('\\', '/').split('static/')[-1]) }}" alt="检测结果">
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p>暂无检测结果。</p>
+                    {% endif %}
+                </div>
+            </article>
             {% endfor %}
-        {% else %}
-            <p>目前没有历史检测记录。</p>
+        </section>
+
+        {% if pagination and pagination.pages > 1 %}
+        <nav class="pagination">
+            {% if pagination.has_prev %}
+            <a class="button-secondary" href="{{ url_for('history', page=pagination.prev_num) }}">上一页</a>
+            {% endif %}
+            <span>第 {{ pagination.page }} / {{ pagination.pages }} 页</span>
+            {% if pagination.has_next %}
+            <a class="button-secondary" href="{{ url_for('history', page=pagination.next_num) }}">下一页</a>
+            {% endif %}
+        </nav>
         {% endif %}
-    </div>
+        {% else %}
+        <section class="surface empty-state">目前没有历史检测记录。</section>
+        {% endif %}
+    </main>
+
+    <script>
+        document.querySelectorAll(".delete-record").forEach((button) => {
+            button.addEventListener("click", async () => {
+                if (!confirm("确定删除这条记录吗？")) {
+                    return;
+                }
+                const id = button.dataset.recordId;
+                const response = await fetch(`/api/history/delete/${id}`, { method: "DELETE" });
+                const data = await response.json();
+                if (data.success) {
+                    document.querySelector(`[data-record-id="${id}"]`).remove();
+                } else {
+                    alert(data.error || "删除失败");
+                }
+            });
+        });
+    </script>
 </body>
 </html>

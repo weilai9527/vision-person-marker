@@ -43,57 +43,58 @@ function updatePreview(file) {
     previewEmpty.style.display = "none";
 }
 
-openApiButton.addEventListener("click", openApiModal);
-closeApiButton.addEventListener("click", closeApiModal);
-cancelApiButton.addEventListener("click", closeApiModal);
+if (openApiButton) {
+    openApiButton.addEventListener("click", openApiModal);
+    closeApiButton.addEventListener("click", closeApiModal);
+    cancelApiButton.addEventListener("click", closeApiModal);
 
-provider.addEventListener("change", () => {
-    const selectedProvider = provider.options[provider.selectedIndex];
-    apiUrl.value = selectedProvider.dataset.url || apiUrl.value;
-    model.value = selectedProvider.dataset.model || model.value;
-});
-
-apiModal.addEventListener("click", (event) => {
-    if (event.target === apiModal) {
-        closeApiModal();
-    }
-});
-
-document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && apiModal.classList.contains("open")) {
-        closeApiModal();
-    }
-});
-
-input.addEventListener("change", () => {
-    updatePreview(input.files[0]);
-});
-
-["dragenter", "dragover"].forEach((eventName) => {
-    dropzone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        dropzone.classList.add("dragover");
+    provider.addEventListener("change", () => {
+        const selectedProvider = provider.options[provider.selectedIndex];
+        apiUrl.value = selectedProvider.dataset.url || apiUrl.value;
+        model.value = selectedProvider.dataset.model || model.value;
     });
-});
 
-["dragleave", "dragend", "drop"].forEach((eventName) => {
-    dropzone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        dropzone.classList.remove("dragover");
+    apiModal.addEventListener("click", (event) => {
+        if (event.target === apiModal) {
+            closeApiModal();
+        }
     });
-});
 
-dropzone.addEventListener("drop", (event) => {
-    const files = event.dataTransfer.files;
-    if (!files || files.length === 0) {
-        return;
-    }
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && apiModal.classList.contains("open")) {
+            closeApiModal();
+        }
+    });
+}
 
-    input.files = files;
-    updatePreview(files[0]);
-});
+if (input) {
+    input.addEventListener("change", () => updatePreview(input.files[0]));
 
-form.addEventListener("submit", () => {
-    submitButton.disabled = true;
-    submitButton.textContent = "检测中...";
-});
+    ["dragenter", "dragover"].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            dropzone.classList.add("dragover");
+        });
+    });
+
+    ["dragleave", "dragend", "drop"].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            dropzone.classList.remove("dragover");
+        });
+    });
+
+    dropzone.addEventListener("drop", (event) => {
+        const files = event.dataTransfer.files;
+        if (!files || files.length === 0) {
+            return;
+        }
+        input.files = files;
+        updatePreview(files[0]);
+    });
+
+    form.addEventListener("submit", () => {
+        submitButton.disabled = true;
+        submitButton.textContent = "检测中...";
+    });
+}

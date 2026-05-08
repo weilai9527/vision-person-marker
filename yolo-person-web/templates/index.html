@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>大模型人数检测</title>
+    <title>YOLO 人数检测</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
 </head>
 <body>
@@ -13,8 +13,11 @@
                 <p class="eyebrow">Local YOLO Person Detection</p>
                 <h1>YOLO 人数检测</h1>
             </div>
-            <a href="{{ url_for('history') }}" class="button-secondary" style="margin-right: 10px;">历史记录</a>
-            <button class="button-secondary" type="button" id="openApiButton">添加 API</button>
+            <nav class="header-actions">
+                <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
+                <a href="{{ url_for('history') }}" class="button-secondary">历史记录</a>
+                <button class="button-secondary" type="button" id="openApiButton">添加 API</button>
+            </nav>
         </header>
 
         <section class="workspace">
@@ -78,7 +81,7 @@
                 </div>
             </div>
             <div class="surface result-image-wrap">
-                <img src="{{ result_image_url }}" alt="上传图片">
+                <img src="{{ result_image_url }}" alt="检测结果">
             </div>
         </section>
         {% endif %}
@@ -109,15 +112,15 @@
                 </div>
                 <div class="field">
                     <label for="apiUrl">API 地址</label>
-                    <input id="apiUrl" name="api_url" type="url" value="{{ api_config.api_url }}" placeholder="https://api.openai.com/v1/chat/completions" required>
+                    <input id="apiUrl" name="api_url" type="url" value="{{ api_config.api_url }}" required>
                 </div>
                 <div class="field">
                     <label for="apiKey">API Key</label>
-                    <input id="apiKey" name="api_key" type="password" value="{{ api_config.api_key }}" placeholder="请输入 API Key" required>
+                    <input id="apiKey" name="api_key" type="password" value="{{ api_config.api_key }}" required>
                 </div>
                 <div class="field">
                     <label for="model">模型名称</label>
-                    <input id="model" name="model" type="text" value="{{ api_config.model }}" placeholder="gpt-4o-mini" required>
+                    <input id="model" name="model" type="text" value="{{ api_config.model }}" required>
                 </div>
                 <div class="form-actions">
                     <button type="submit">保存 API</button>

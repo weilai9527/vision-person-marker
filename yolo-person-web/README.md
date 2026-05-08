@@ -1,60 +1,58 @@
-# 大模型人数检测网页
+# YOLO 人员检测网页
 
-这是一个本地 Flask 小网站：上传一张图片后，程序会调用兼容 OpenAI Chat Completions 格式的视觉大模型 API，判断图片中的人数，并显示人数、模型说明和原图。
+这是一个本地 Flask 小网站，支持图片和视频里的人员检测。图片上传后会使用本地 YOLO 模型框选行人；视频上传后会逐帧处理，生成带检测框的视频结果。
 
-## 目录说明
+## 主要目录
 
 ```text
-D:\yolodemo\yolo-person-web\
-   app.py              Flask 后端，负责上传、调用大模型 API 和保存结果
-   start.bat           Windows 启动脚本
-   requirements.txt    Python 依赖
-   templates\
-      index.html       网页界面
-   static\
-      uploads\         上传的原图
-      results\         用于页面展示的图片副本
+yolo-person-web/
+  app.py                 Flask 入口
+  config.py              路径和模型参数配置
+  models.py              数据库模型
+  services/              检测、绘图、视频处理等服务模块
+  templates/             页面模板
+  static/uploads/        图片上传目录
+  static/results/        图片检测结果
+  static/videos/         视频上传目录
+  static/video_results/  视频检测结果
+  instance/              数据库、日志和本地配置
 ```
 
 ## 安装依赖
 
 ```powershell
-cd D:\yolodemo\yolo-person-web
-D:\yolo\yolo_env\Scripts\python.exe -m pip install -r requirements.txt
+cd yolo-person-web
+python -m pip install -r requirements.txt
 ```
-
-## 配置 API
-
-至少需要设置 `LLM_API_KEY`。如果你的服务商不是 OpenAI 官方接口，也需要设置 `LLM_API_URL` 和 `LLM_MODEL`。
-
-```powershell
-$env:LLM_API_KEY="你的 API Key"
-$env:LLM_API_URL="https://api.openai.com/v1/chat/completions"
-$env:LLM_MODEL="gpt-4o-mini"
-```
-
-可选配置：
-
-- `LLM_API_URL`：大模型接口地址，默认 `https://api.openai.com/v1/chat/completions`
-- `LLM_MODEL`：视觉模型名称，默认 `gpt-4o-mini`
-- `LLM_TIMEOUT`：接口超时时间，默认 `60` 秒
 
 ## 运行
 
 ```powershell
-cd D:\yolodemo\yolo-person-web
-D:\yolo\yolo_env\Scripts\python.exe app.py
+cd yolo-person-web
+python app.py
 ```
 
-启动后打开浏览器访问：
+启动后访问：
 
 ```text
 http://127.0.0.1:5000
 ```
 
-## 可以清理的文件
+也可以在项目根目录双击 `start.bat`。
 
-- `static\uploads\`：历史上传图片，不影响程序代码。
-- `static\results\`：历史展示图片，不影响程序代码。
-- `__pycache__\`：Python 自动生成的缓存。
-- `server.out.log` / `server.err.log`：启动日志。
+## 常用配置
+
+- `YOLO_MODEL_PATH`：YOLO 模型路径，默认使用上级 `models/yolov8s.pt`
+- `YOLO_CONF`：检测置信度阈值，默认 `0.25`
+- `YOLO_IOU`：NMS IOU 阈值，默认 `0.50`
+- `YOLO_IMGSZ`：推理尺寸，默认 `1280`
+- `YOLO_DEVICE`：推理设备，默认 `auto`。安装 CUDA 版 PyTorch 时会自动使用第 1 张 GPU；也可以手动设为 `0`、`1` 或 `cpu`
+- `VIDEO_MAX_SIZE`：视频最大上传大小，默认 `500` MB
+
+## GPU 加速
+
+项目的 YOLO 推理支持 GPU。当前环境如果是 CPU 版 PyTorch，程序会自动退回 CPU。要启用 GPU，需要安装和显卡驱动匹配的 CUDA 版 PyTorch，然后保持 `YOLO_DEVICE=auto` 或手动设置为 `YOLO_DEVICE=0`。
+
+视频读取、绘制检测框和写出 mp4 仍由 OpenCV 处理，通常还是 CPU；速度提升主要来自 YOLO 推理阶段。
+
+可清理目录：`static/uploads/`、`static/results/`、`static/videos/`、`static/video_results/`、`instance/logs/`。

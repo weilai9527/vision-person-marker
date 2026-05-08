@@ -1,6 +1,6 @@
 flask
-flask_sqlalchemy
-requests
+flask-sqlalchemy
 pillow
+requests
 ultralytics
 opencv-python

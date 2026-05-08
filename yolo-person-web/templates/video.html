@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>&#35270;&#39057;&#20154;&#21592;&#26816;&#27979;</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
+</head>
+<body>
+    <main class="app-shell">
+        <header class="app-header">
+            <div class="brand">
+                <p class="eyebrow">Video Person Detection</p>
+                <h1>&#35270;&#39057;&#20154;&#21592;&#26816;&#27979;</h1>
+            </div>
+            <nav class="header-actions">
+                <a href="{{ url_for('index') }}" class="button-secondary">&#22270;&#29255;&#26816;&#27979;</a>
+                <a href="{{ url_for('history') }}" class="button-secondary">&#21382;&#21490;&#35760;&#24405;</a>
+            </nav>
+        </header>
+
+        <section class="workspace">
+            <div class="surface upload-surface">
+                <div class="surface-header">
+                    <div>
+                        <h2 class="surface-title">&#19978;&#20256;&#35270;&#39057;</h2>
+                        <p>&#25903;&#25345; mp4&#12289;avi&#12289;mov&#12289;mkv&#12289;webm&#12289;flv&#65292;&#22788;&#29702;&#23436;&#25104;&#21518;&#21487;&#20197;&#30452;&#25509;&#39044;&#35272;&#12290;</p>
+                    </div>
+                    <span class="api-status">&#26412;&#22320; YOLO</span>
+                </div>
+                <form id="videoForm">
+                    <label class="dropzone" id="videoDropzone" for="videoInput">
+                        <span class="dropzone-main">
+                            <span class="upload-mark">+</span>
+                            <strong>&#25302;&#25341;&#35270;&#39057;&#21040;&#36825;&#37324;</strong>
+                            <span>&#20063;&#21487;&#20197;&#28857;&#20987;&#36873;&#25321;&#25991;&#20214;&#12290;</span>
+                        </span>
+                        <input id="videoInput" type="file" name="video" accept=".mp4,.avi,.mov,.mkv,.webm,.flv" required>
+                    </label>
+                    <div class="file-row">
+                        <div class="file-name" id="videoFileName">&#36824;&#27809;&#26377;&#36873;&#25321;&#35270;&#39057;</div>
+                        <button type="submit" id="videoSubmitButton">&#24320;&#22987;&#22788;&#29702;</button>
+                    </div>
+                </form>
+            </div>
+
+            <aside class="surface progress-panel">
+                <h2 class="surface-title">&#22788;&#29702;&#36827;&#24230;</h2>
+                <div class="progress-bar"><span id="progressFill"></span></div>
+                <p id="progressText">&#31561;&#24453;&#19978;&#20256;&#35270;&#39057;</p>
+                <div class="video-result" id="videoResult"></div>
+            </aside>
+        </section>
+
+        <section class="surface video-history">
+            <div class="surface-header">
+                <div>
+                    <h2 class="surface-title">&#35270;&#39057;&#35760;&#24405;</h2>
+                    <p>&#26368;&#36817;&#19978;&#20256;&#21644;&#22788;&#29702;&#30340;&#35270;&#39057;&#65292;&#21487;&#30452;&#25509;&#39044;&#35272;&#24050;&#23436;&#25104;&#32467;&#26524;&#12290;</p>
+                </div>
+                <button class="button-secondary" type="button" id="refreshVideoHistory">&#21047;&#26032;</button>
+            </div>
+            <div id="videoHistoryList" class="video-history-list">&#27491;&#22312;&#21152;&#36733;...</div>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='video.js') }}"></script>
+</body>
+</html>
