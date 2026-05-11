@@ -135,7 +135,13 @@ p {
     align-items: stretch;
 }
 
+.workspace > *,
+.surface-header > div {
+    min-width: 0;
+}
+
 .surface {
+    min-width: 0;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -176,12 +182,15 @@ p {
 }
 
 form {
+    min-width: 0;
     display: grid;
     gap: 14px;
 }
 
 .dropzone {
     position: relative;
+    width: 100%;
+    min-width: 0;
     display: grid;
     place-items: center;
     gap: 10px;
@@ -192,6 +201,7 @@ form {
     background: var(--surface-soft);
     text-align: center;
     cursor: pointer;
+    overflow: hidden;
     transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
 
@@ -212,14 +222,30 @@ form {
     background: #fff7f6;
 }
 
+.image-dropzone.has-preview {
+    padding: 12px;
+    background: #101820;
+    border-color: rgba(15, 118, 110, 0.60);
+}
+
+.image-dropzone.has-preview .dropzone-main {
+    display: none;
+}
+
 .dropzone input[type="file"] {
     position: absolute;
     inset: 0;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
     opacity: 0;
     cursor: pointer;
+    z-index: 2;
 }
 
 .dropzone-main {
+    min-width: 0;
+    width: 100%;
     display: grid;
     gap: 8px;
     justify-items: center;
@@ -228,6 +254,29 @@ form {
 .video-dropzone {
     min-height: 300px;
     overflow: hidden;
+}
+
+.upload-image-preview {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    min-height: 236px;
+    display: grid;
+    place-items: center;
+}
+
+.upload-image-preview[hidden] {
+    display: none;
+}
+
+.upload-image-preview img {
+    width: 100%;
+    height: min(42vw, 420px);
+    min-height: 236px;
+    max-height: 420px;
+    object-fit: contain;
+    border-radius: 6px;
+    background: #101820;
 }
 
 .video-dropzone input[type="file"] {
@@ -308,6 +357,7 @@ form {
 
 .file-row,
 .form-actions {
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -329,6 +379,7 @@ form {
 }
 
 .file-name {
+    flex: 1 1 auto;
     min-width: 0;
     color: var(--text);
     font-size: 14px;
@@ -336,6 +387,11 @@ form {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.file-row > button,
+.form-actions > button {
+    flex: 0 0 auto;
 }
 
 .file-meta {
@@ -349,6 +405,7 @@ form {
 }
 
 .preview-surface {
+    min-width: 0;
     display: grid;
     grid-template-rows: auto minmax(260px, 1fr);
     overflow: hidden;
@@ -360,11 +417,13 @@ form {
 }
 
 .preview-body {
+    min-width: 0;
     min-height: 320px;
     display: grid;
     place-items: center;
     padding: 18px;
     background: #111a20;
+    overflow: hidden;
 }
 
 .preview-empty {
@@ -386,6 +445,16 @@ form {
     border-radius: 6px;
 }
 
+.preview-result-image {
+    width: 100%;
+    height: 100%;
+    min-height: 320px;
+    max-height: 560px;
+    object-fit: contain;
+    border-radius: 6px;
+    background: #101820;
+}
+
 .message {
     margin-top: 18px;
     padding: 13px 15px;
@@ -403,10 +472,7 @@ form {
 
 .result {
     margin-top: 18px;
-    display: grid;
-    grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1.15fr);
-    gap: 18px;
-    align-items: stretch;
+    display: block;
 }
 
 .result-summary {
@@ -722,10 +788,148 @@ form {
     border-top: 1px solid var(--border);
 }
 
+.camera-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 18px;
+    align-items: start;
+}
+
+.camera-panel {
+    overflow: hidden;
+}
+
+.camera-view {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 420px;
+    aspect-ratio: 16 / 9;
+    background: #101820;
+}
+
+.camera-view video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.camera-placeholder {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    gap: 12px;
+    place-items: center;
+    align-content: center;
+    padding: 24px;
+    color: #c8d3db;
+    text-align: center;
+    background: #101820;
+}
+
+.camera-placeholder.is-hidden {
+    display: none;
+}
+
+.camera-placeholder-icon {
+    width: 72px;
+    height: 72px;
+    display: grid;
+    place-items: center;
+    color: #9fb0bd;
+}
+
+.camera-placeholder-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.camera-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: end;
+    padding: 18px;
+}
+
+.camera-device-field {
+    margin: 0;
+}
+
+.camera-device-field span {
+    font-weight: 700;
+}
+
+.camera-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.camera-status-panel {
+    display: grid;
+    gap: 14px;
+    padding: 20px;
+}
+
+.camera-status-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.camera-status-dot {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #8b9aa6;
+}
+
+.camera-status-dot.is-active {
+    background: #179a63;
+    box-shadow: 0 0 0 6px rgba(23, 154, 99, 0.14);
+}
+
+.camera-status-dot.is-error {
+    background: var(--danger);
+    box-shadow: 0 0 0 6px rgba(180, 35, 24, 0.10);
+}
+
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 22px;
+    z-index: 30;
+    max-width: min(420px, calc(100% - 28px));
+    padding: 12px 16px;
+    border-radius: 8px;
+    color: #ffffff;
+    background: var(--primary);
+    box-shadow: 0 16px 36px rgba(12, 20, 25, 0.22);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 16px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.toast.success {
+    background: #177f57;
+}
+
+.toast.error {
+    background: var(--danger);
+}
+
 @media (max-width: 860px) {
     .workspace,
     .result,
-    .record-card {
+    .record-card,
+    .camera-workspace {
         grid-template-columns: 1fr;
     }
 
@@ -745,6 +949,7 @@ form {
     .file-row,
     .form-actions,
     .record-title-row,
+    .camera-controls,
     .video-record {
         align-items: stretch;
         flex-direction: column;
@@ -758,12 +963,25 @@ form {
     .api-panel,
     .result-summary,
     .progress-panel,
-    .video-history {
+    .video-history,
+    .camera-status-panel {
         padding: 18px;
     }
 
     button,
     .button-secondary {
         width: 100%;
+    }
+
+    .camera-view {
+        min-height: 260px;
+    }
+
+    .camera-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .camera-buttons {
+        flex-direction: column;
     }
 }

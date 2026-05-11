@@ -11,8 +11,8 @@ const input = document.getElementById("imageInput");
 const fileName = document.getElementById("fileName");
 const form = document.getElementById("uploadForm");
 const submitButton = document.getElementById("submitButton");
-const previewEmpty = document.getElementById("previewEmpty");
-const previewImage = document.getElementById("previewImage");
+const uploadImagePreview = document.getElementById("uploadImagePreview");
+const uploadPreviewImage = document.getElementById("uploadPreviewImage");
 
 function openApiModal() {
     apiModal.classList.add("open");
@@ -29,18 +29,18 @@ function closeApiModal() {
 function updatePreview(file) {
     if (!file) {
         fileName.textContent = "还没有选择图片";
-        previewImage.removeAttribute("src");
-        previewImage.style.display = "none";
-        previewEmpty.style.display = "grid";
+        dropzone.classList.remove("has-preview");
+        uploadImagePreview.hidden = true;
+        uploadPreviewImage.removeAttribute("src");
         return;
     }
 
     fileName.textContent = `已选择: ${file.name}`;
     const imageUrl = URL.createObjectURL(file);
-    previewImage.onload = () => URL.revokeObjectURL(imageUrl);
-    previewImage.src = imageUrl;
-    previewImage.style.display = "block";
-    previewEmpty.style.display = "none";
+    uploadPreviewImage.onload = () => URL.revokeObjectURL(imageUrl);
+    uploadPreviewImage.src = imageUrl;
+    uploadImagePreview.hidden = false;
+    dropzone.classList.add("has-preview");
 }
 
 if (openApiButton) {

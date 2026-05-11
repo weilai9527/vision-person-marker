@@ -13,10 +13,10 @@ LLM_API_URL = os.environ.get("LLM_API_URL", "https://api.openai.com/v1/chat/comp
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "180"))
-MODEL_IMAGE_MAX_SIDE = int(os.environ.get("MODEL_IMAGE_MAX_SIDE", "0"))
-MODEL_IMAGE_JPEG_QUALITY = int(os.environ.get("MODEL_IMAGE_JPEG_QUALITY", "82"))
-MODEL_IMAGE_MIN_SIDE = int(os.environ.get("MODEL_IMAGE_MIN_SIDE", "900"))
-MODEL_IMAGE_MAX_PIXELS = int(os.environ.get("MODEL_IMAGE_MAX_PIXELS", "1600000"))
+MODEL_IMAGE_MAX_SIDE = int(os.environ.get("MODEL_IMAGE_MAX_SIDE", "1280"))
+MODEL_IMAGE_JPEG_QUALITY = int(os.environ.get("MODEL_IMAGE_JPEG_QUALITY", "72"))
+MODEL_IMAGE_MIN_SIDE = int(os.environ.get("MODEL_IMAGE_MIN_SIDE", "720"))
+MODEL_IMAGE_MAX_PIXELS = int(os.environ.get("MODEL_IMAGE_MAX_PIXELS", "900000"))
 BOX_EXPAND_X = float(os.environ.get("BOX_EXPAND_X", "0"))
 BOX_EXPAND_Y = float(os.environ.get("BOX_EXPAND_Y", "0"))
 ENABLE_TILE_DETECTION = os.environ.get("ENABLE_TILE_DETECTION", "0") == "1"
@@ -29,6 +29,9 @@ YOLO_IOU = float(os.environ.get("YOLO_IOU", "0.50"))
 YOLO_IMGSZ = int(os.environ.get("YOLO_IMGSZ", "1280"))
 YOLO_MIN_AREA = int(os.environ.get("YOLO_MIN_AREA", "60"))
 YOLO_DEVICE = os.environ.get("YOLO_DEVICE", "auto")
+AUTO_LLM_COMPLEX_PERSONS = int(os.environ.get("AUTO_LLM_COMPLEX_PERSONS", "12"))
+AUTO_LLM_LOW_CONF = float(os.environ.get("AUTO_LLM_LOW_CONF", "0.45"))
+AUTO_LLM_SMALL_BOX_RATIO = float(os.environ.get("AUTO_LLM_SMALL_BOX_RATIO", "0.018"))
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}

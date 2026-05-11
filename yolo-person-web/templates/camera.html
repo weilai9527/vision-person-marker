@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>摄像头预览</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
+</head>
+<body>
+    <main class="app-shell">
+        <header class="app-header">
+            <div class="brand">
+                <p class="eyebrow">Local Camera Preview</p>
+                <h1>摄像头预览</h1>
+            </div>
+            <nav class="header-actions">
+                <a href="{{ url_for('index') }}" class="button-secondary">图片检测</a>
+                <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
+                <a href="{{ url_for('vehicle_page') }}" class="button-secondary">车辆检测</a>
+                <a href="{{ url_for('history') }}" class="button-secondary">历史记录</a>
+            </nav>
+        </header>
+
+        <section class="camera-workspace">
+            <div class="surface camera-panel">
+                <div class="camera-view">
+                    <video id="cameraVideo" autoplay playsinline muted></video>
+                    <div class="camera-placeholder" id="cameraPlaceholder">
+                        <span class="camera-placeholder-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none">
+                                <path d="M15 10l4.55-2.27A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </span>
+                        <strong>点击开始后预览摄像头画面</strong>
+                    </div>
+                </div>
+
+                <div class="camera-controls">
+                    <label class="field camera-device-field" for="cameraSelect">
+                        <span>摄像头</span>
+                        <select id="cameraSelect" disabled>
+                            <option value="">正在检测设备...</option>
+                        </select>
+                    </label>
+
+                    <div class="camera-buttons">
+                        <button type="button" id="startCameraButton">开始</button>
+                        <button type="button" class="button-danger" id="stopCameraButton" disabled>停止</button>
+                    </div>
+                </div>
+            </div>
+
+            <aside class="surface camera-status-panel">
+                <h2 class="surface-title">设备状态</h2>
+                <div class="camera-status-line">
+                    <span class="camera-status-dot is-idle" id="cameraStatusDot"></span>
+                    <strong id="cameraStatusText">就绪</strong>
+                </div>
+                <p id="cameraHint">浏览器会在开始时请求摄像头权限。</p>
+            </aside>
+        </section>
+    </main>
+
+    <div class="toast" id="cameraToast" role="status" aria-live="polite"></div>
+    <script src="{{ url_for('static', filename='camera.js') }}"></script>
+</body>
+</html>

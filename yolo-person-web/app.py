@@ -27,8 +27,9 @@ from config import (
     API_PROVIDERS,
 )
 from models import db, ImageRecord, VideoRecord
-from services.image_service import draw_person_boxes
-from services.yolo_service import call_local_yolo
+from services.image_service import draw_person_boxes, draw_vehicle_boxes
+from services.llm_service import call_yolo_judge_model
+from services.yolo_service import VEHICLE_CLASS_IDS, call_local_yolo, is_complex_person_scene, run_yolo_detection
 from services.video_service import (
     process_video_detection,
     get_video_progress,
@@ -72,6 +73,10 @@ def mask_api_key(key: str) -> str:
     return key[:4] + "*" * (len(key) - 8) + key[-4:]
 
 
+def is_masked_api_key(key: str) -> bool:
+    return "*" in (key or "")
+
+
 def load_api_config() -> dict:
     config = {
         "provider": "openai",
@@ -89,13 +94,18 @@ def load_api_config() -> dict:
     if config["provider"] not in API_PROVIDERS or config["provider"] == "openai":
         config["provider"] = infer_provider(config["api_url"])
     config["model"] = normalize_model_name(config["provider"], config["model"])
+    if is_masked_api_key(config.get("api_key", "")):
+        config["api_key"] = ""
     return config
 
 
 def load_api_config_for_display() -> dict:
     config = load_api_config()
     if config.get("api_key"):
-        config["api_key"] = mask_api_key(config["api_key"])
+        config["api_key_masked"] = mask_api_key(config["api_key"])
+        config["api_key"] = ""
+    else:
+        config["api_key_masked"] = ""
     return config
 
 
@@ -103,10 +113,14 @@ def save_api_config(provider: str, api_url: str, api_key: str, model: str) -> No
     provider = provider if provider in API_PROVIDERS else "custom"
     provider_defaults = API_PROVIDERS[provider]
     normalized_model = normalize_model_name(provider, model) or provider_defaults["model"]
+    current_config = load_api_config()
+    cleaned_api_key = api_key.strip()
+    if not cleaned_api_key or is_masked_api_key(cleaned_api_key):
+        cleaned_api_key = current_config.get("api_key", "")
     config = {
         "provider": provider,
         "api_url": normalize_chat_endpoint(api_url or provider_defaults["api_url"]),
-        "api_key": api_key.strip(),
+        "api_key": cleaned_api_key,
         "model": normalized_model,
     }
     API_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -165,8 +179,10 @@ def index():
             api_url = request.form.get("api_url", "")
             api_key = request.form.get("api_key", "")
             model = request.form.get("model", "")
-            if not api_key.strip():
-                error = "\u8bf7\u586b\u5199 API Key\u3002"
+            current_api_config = load_api_config()
+            submitted_api_key = api_key.strip()
+            if (not submitted_api_key or is_masked_api_key(submitted_api_key)) and not current_api_config.get("api_key"):
+                error = "\u8bf7\u586b\u5199\u5b8c\u6574 API Key\uff0c\u4e0d\u80fd\u4f7f\u7528\u5df2\u63a9\u7801\u7684 Key\u3002"
             else:
                 save_api_config(provider, api_url, api_key, model)
                 api_config = load_api_config_for_display()
@@ -197,9 +213,51 @@ def index():
                 db.session.commit()
 
                 try:
-                    person_count, analysis, result_name, model_width, model_height = call_local_yolo(
-                        upload_path, image_record.id, api_config, draw_person_boxes
-                    )
+                    detection_config = load_api_config()
+                    if detection_config.get("api_key"):
+                        preflight_boxes, preflight_width, preflight_height = run_yolo_detection(upload_path)
+                        is_complex, complexity_reason = is_complex_person_scene(
+                            preflight_boxes, preflight_width, preflight_height
+                        )
+                        if is_complex:
+                            try:
+                                person_count, analysis, result_name, model_width, model_height = call_yolo_judge_model(
+                                    upload_path,
+                                    image_record.id,
+                                    detection_config,
+                                    draw_person_boxes,
+                                    preflight_boxes,
+                                    preflight_width,
+                                    preflight_height,
+                                    analysis_prefix=f"YOLO 快速预判：{complexity_reason}，已交给大模型裁判复核。",
+                                )
+                            except Exception as llm_exc:
+                                person_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                                    upload_path,
+                                    image_record.id,
+                                    {"provider": "auto_yolo_llm_fallback"},
+                                    draw_person_boxes,
+                                    analysis_prefix=(
+                                        f"YOLO 快速预判：{complexity_reason}，但大模型调用失败，已回退本地 YOLO。"
+                                        f"大模型错误：{llm_exc}。"
+                                    ),
+                                    precomputed_boxes=preflight_boxes,
+                                    precomputed_size=(preflight_width, preflight_height),
+                                )
+                        else:
+                            person_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                                upload_path,
+                                image_record.id,
+                                {"provider": "auto_yolo_simple"},
+                                draw_person_boxes,
+                                analysis_prefix=f"YOLO 快速预判：{complexity_reason}，直接使用本地结果。",
+                                precomputed_boxes=preflight_boxes,
+                                precomputed_size=(preflight_width, preflight_height),
+                            )
+                    else:
+                        person_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                            upload_path, image_record.id, {"provider": "local_yolo"}, draw_person_boxes
+                        )
                     image_record.model_image_path = str(upload_path)
                     image_record.model_width = model_width
                     image_record.model_height = model_height
@@ -216,7 +274,7 @@ def index():
         success=success,
         api_config=api_config,
         api_providers=API_PROVIDERS,
-        has_api_key=bool(api_config.get("api_key")),
+        has_api_key=bool(load_api_config().get("api_key")),
         person_count=person_count,
         analysis=analysis,
         result_image_url=result_image_url,
@@ -233,6 +291,74 @@ def history():
         page=page, per_page=per_page, error_out=False
     )
     return render_template("history.html", pagination=pagination, records=pagination.items)
+
+
+@app.route("/camera")
+def camera_page():
+    return render_template("camera.html")
+
+
+@app.route("/vehicle", methods=["GET", "POST"])
+def vehicle_page():
+    error = None
+    vehicle_count = None
+    analysis = None
+    result_image_url = None
+    original_filename = None
+
+    if request.method == "POST":
+        file = request.files.get("image")
+        if file is None or file.filename == "":
+            error = "\u8bf7\u5148\u9009\u62e9\u4e00\u5f20\u56fe\u7247\u3002"
+        elif not allowed_file(file.filename):
+            error = "\u53ea\u652f\u6301 jpg\u3001jpeg\u3001png\u3001bmp\u3001webp \u683c\u5f0f\u3002"
+        else:
+            original_filename = file.filename
+            suffix = Path(original_filename).suffix.lower()
+            upload_name = f"{uuid4().hex}{suffix}"
+            upload_path = UPLOAD_DIR / upload_name
+            file.save(upload_path)
+
+            with Image.open(upload_path) as img:
+                original_width, original_height = img.size
+
+            image_record = ImageRecord(
+                original_filename=original_filename,
+                original_image_path=str(upload_path),
+                original_width=original_width,
+                original_height=original_height,
+            )
+            db.session.add(image_record)
+            db.session.commit()
+
+            try:
+                vehicle_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                    upload_path,
+                    image_record.id,
+                    {"provider": "local_yolo_vehicle"},
+                    draw_vehicle_boxes,
+                    class_ids=VEHICLE_CLASS_IDS,
+                    target_label="vehicle",
+                    count_label="\u8f66\u8f86",
+                )
+                image_record.model_image_path = str(upload_path)
+                image_record.model_width = model_width
+                image_record.model_height = model_height
+                db.session.commit()
+                result_image_url = url_for("static", filename=f"results/{result_name}")
+            except Exception as exc:
+                error = f"\u8f66\u8f86\u68c0\u6d4b\u5931\u8d25\uff1a{exc}"
+                logger.exception("\u8f66\u8f86\u68c0\u6d4b\u8fc7\u7a0b\u4e2d\u51fa\u9519")
+                db.session.rollback()
+
+    return render_template(
+        "vehicle.html",
+        error=error,
+        vehicle_count=vehicle_count,
+        analysis=analysis,
+        result_image_url=result_image_url,
+        original_filename=original_filename,
+    )
 
 
 @app.route("/api/cleanup-old-files", methods=["POST"])

@@ -110,7 +110,13 @@ def save_model_response_log(
     return str(log_path)
 
 
-def draw_person_boxes(image_path: Path, boxes: list, box_image_size: tuple[int, int] | None = None) -> tuple[str, int]:
+def draw_detection_boxes(
+    image_path: Path,
+    boxes: list,
+    box_image_size: tuple[int, int] | None = None,
+    color: str = "#16a34a",
+    label_key: str | None = None,
+) -> tuple[str, int]:
     result_name = f"{uuid4().hex}{image_path.suffix.lower()}"
     result_path = RESULT_DIR / result_name
 
@@ -136,17 +142,25 @@ def draw_person_boxes(image_path: Path, boxes: list, box_image_size: tuple[int, 
             right = max(0, min(width - 1, round(right * scale_x)))
             bottom = max(0, min(height - 1, round(bottom * scale_y)))
             left, top, right, bottom = expand_box((left, top, right, bottom), width, height)
-            draw.rectangle((left, top, right, bottom), outline="#16a34a", width=line_width)
+            draw.rectangle((left, top, right, bottom), outline=color, width=line_width)
             drawn_count += 1
 
-            label = str(index)
+            label = str(box.get(label_key) or index) if label_key else str(index)
             text_box = draw.textbbox((0, 0), label)
             label_width = text_box[2] - text_box[0] + 12
             label_height = text_box[3] - text_box[1] + 8
             label_top = max(0, top - label_height)
-            draw.rectangle((left, label_top, left + label_width, label_top + label_height), fill="#16a34a")
+            draw.rectangle((left, label_top, left + label_width, label_top + label_height), fill=color)
             draw.text((left + 6, label_top + 4), label, fill="#ffffff")
 
         image.save(result_path)
 
     return result_name, drawn_count
+
+
+def draw_person_boxes(image_path: Path, boxes: list, box_image_size: tuple[int, int] | None = None) -> tuple[str, int]:
+    return draw_detection_boxes(image_path, boxes, box_image_size, color="#16a34a")
+
+
+def draw_vehicle_boxes(image_path: Path, boxes: list, box_image_size: tuple[int, int] | None = None) -> tuple[str, int]:
+    return draw_detection_boxes(image_path, boxes, box_image_size, color="#2563eb", label_key="label")

@@ -15,6 +15,8 @@
             </div>
             <nav class="header-actions">
                 <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
+                <a href="{{ url_for('vehicle_page') }}" class="button-secondary">&#36710;&#36742;&#26816;&#27979;</a>
+                <a href="{{ url_for('camera_page') }}" class="button-secondary">摄像头</a>
                 <a href="{{ url_for('history') }}" class="button-secondary">历史记录</a>
                 <button class="button-secondary" type="button" id="openApiButton">添加 API</button>
             </nav>
@@ -25,17 +27,20 @@
                 <div class="surface-header">
                     <div>
                         <h2 class="surface-title">上传图片</h2>
-                        <p>选择或拖拽一张图片，系统会使用本地 YOLO 模型检测并框选可见行人。</p>
+                        <p>选择或拖拽一张图片。配置 API 后会先用 YOLO 快速预判，复杂图自动转大模型。</p>
                     </div>
-                    <span class="api-status">本地 YOLO</span>
+                    <span class="api-status">{% if has_api_key %}智能分流{% else %}本地 YOLO{% endif %}</span>
                 </div>
 
                 <form method="post" enctype="multipart/form-data" id="uploadForm">
-                    <label class="dropzone" id="dropzone" for="imageInput">
+                    <label class="dropzone image-dropzone" id="dropzone" for="imageInput">
                         <span class="dropzone-main">
                             <span class="upload-mark">+</span>
                             <strong>拖拽图片到这里</strong>
                             <span>也可以点击选择文件，支持 jpg、jpeg、png、bmp、webp。</span>
+                        </span>
+                        <span class="upload-image-preview" id="uploadImagePreview" hidden>
+                            <img id="uploadPreviewImage" alt="已选择图片预览">
                         </span>
                         <input id="imageInput" type="file" name="image" accept=".jpg,.jpeg,.png,.bmp,.webp" required>
                     </label>
@@ -48,12 +53,15 @@
 
             <aside class="surface preview-surface">
                 <div class="preview-head">
-                    <h2 class="surface-title">图片预览</h2>
-                    <p>上传前可先确认图片内容。</p>
+                    <h2 class="surface-title">检测结果</h2>
+                    <p>检测完成后会在下方显示标注结果。</p>
                 </div>
                 <div class="preview-body">
-                    <div class="preview-empty" id="previewEmpty">等待选择图片</div>
-                    <img class="preview-image" id="previewImage" alt="待检测图片预览">
+                    {% if result_image_url %}
+                    <img class="preview-result-image" src="{{ result_image_url }}" alt="检测结果">
+                    {% else %}
+                    <div class="preview-empty">等待检测结果</div>
+                    {% endif %}
                 </div>
             </aside>
         </section>
@@ -79,9 +87,6 @@
                     <p>模型说明：{{ analysis }}</p>
                     {% endif %}
                 </div>
-            </div>
-            <div class="surface result-image-wrap">
-                <img src="{{ result_image_url }}" alt="检测结果">
             </div>
         </section>
         {% endif %}
@@ -116,7 +121,14 @@
                 </div>
                 <div class="field">
                     <label for="apiKey">API Key</label>
-                    <input id="apiKey" name="api_key" type="password" value="{{ api_config.api_key }}" required>
+                    <input
+                        id="apiKey"
+                        name="api_key"
+                        type="password"
+                        value=""
+                        placeholder="{% if api_config.api_key_masked %}已保存 {{ api_config.api_key_masked }}，留空不修改{% else %}请输入完整 API Key{% endif %}"
+                        {% if not api_config.api_key_masked %}required{% endif %}
+                    >
                 </div>
                 <div class="field">
                     <label for="model">模型名称</label>

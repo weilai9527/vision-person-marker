@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>&#36710;&#36742;&#26816;&#27979;</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
+</head>
+<body>
+    <main class="app-shell">
+        <header class="app-header">
+            <div class="brand">
+                <p class="eyebrow">Vehicle Detection</p>
+                <h1>&#36710;&#36742;&#26816;&#27979;</h1>
+            </div>
+            <nav class="header-actions">
+                <a href="{{ url_for('index') }}" class="button-secondary">&#22270;&#29255;&#26816;&#27979;</a>
+                <a href="{{ url_for('video_page') }}" class="button-secondary">&#35270;&#39057;&#26816;&#27979;</a>
+                <a href="{{ url_for('camera_page') }}" class="button-secondary">摄像头</a>
+                <a href="{{ url_for('history') }}" class="button-secondary">&#21382;&#21490;&#35760;&#24405;</a>
+            </nav>
+        </header>
+
+        <section class="workspace">
+            <div class="surface upload-surface">
+                <div class="surface-header">
+                    <div>
+                        <h2 class="surface-title">&#19978;&#20256;&#22270;&#29255;</h2>
+                        <p>&#36873;&#25321;&#25110;&#25302;&#25341;&#19968;&#24352;&#22270;&#29255;&#65292;&#31995;&#32479;&#20250;&#26816;&#27979;&#24182;&#26631;&#27880;&#33258;&#34892;&#36710;&#12289;&#23567;&#27773;&#36710;&#12289;&#25705;&#25176;&#36710;&#12289;&#20844;&#20132;&#36710;&#21644;&#21345;&#36710;&#12290;</p>
+                    </div>
+                    <span class="api-status">&#26412;&#22320; YOLO</span>
+                </div>
+
+                <form method="post" enctype="multipart/form-data" id="vehicleForm">
+                    <label class="dropzone" id="vehicleDropzone" for="vehicleImageInput">
+                        <span class="dropzone-main">
+                            <span class="upload-mark">+</span>
+                            <strong>&#25302;&#25341;&#22270;&#29255;&#21040;&#36825;&#37324;</strong>
+                            <span>&#20063;&#21487;&#20197;&#28857;&#20987;&#36873;&#25321;&#25991;&#20214;&#65292;&#25903;&#25345; jpg&#12289;jpeg&#12289;png&#12289;bmp&#12289;webp&#12290;</span>
+                        </span>
+                        <input id="vehicleImageInput" type="file" name="image" accept=".jpg,.jpeg,.png,.bmp,.webp" required>
+                    </label>
+                    <div class="file-row">
+                        <div class="file-name" id="vehicleFileName">&#36824;&#27809;&#26377;&#36873;&#25321;&#22270;&#29255;</div>
+                        <button type="submit" id="vehicleSubmitButton">&#24320;&#22987;&#26816;&#27979;</button>
+                    </div>
+                </form>
+            </div>
+
+            <aside class="surface preview-surface">
+                <div class="preview-head">
+                    <h2 class="surface-title">&#22270;&#29255;&#39044;&#35272;</h2>
+                    <p>&#19978;&#20256;&#21069;&#21487;&#20808;&#30830;&#35748;&#22270;&#29255;&#20869;&#23481;&#12290;</p>
+                </div>
+                <div class="preview-body">
+                    <div class="preview-empty" id="vehiclePreviewEmpty">&#31561;&#24453;&#36873;&#25321;&#22270;&#29255;</div>
+                    <img class="preview-image" id="vehiclePreviewImage" alt="&#24453;&#26816;&#27979;&#22270;&#29255;&#39044;&#35272;">
+                </div>
+            </aside>
+        </section>
+
+        {% if error %}
+        <div class="message error">{{ error }}</div>
+        {% endif %}
+
+        {% if vehicle_count is not none %}
+        <section class="result">
+            <div class="surface result-summary">
+                <div class="count-label">&#26816;&#27979;&#36710;&#36742;&#25968;</div>
+                <div class="count">{{ vehicle_count }}</div>
+                <div class="result-meta">
+                    {% if original_filename %}
+                    <p>&#22270;&#29255;&#25991;&#20214;&#65306;{{ original_filename }}</p>
+                    {% endif %}
+                    {% if analysis %}
+                    <p>&#27169;&#22411;&#35828;&#26126;&#65306;{{ analysis }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="surface result-image-wrap">
+                <img src="{{ result_image_url }}" alt="&#36710;&#36742;&#26816;&#27979;&#32467;&#26524;">
+            </div>
+        </section>
+        {% endif %}
+    </main>
+
+    <script src="{{ url_for('static', filename='vehicle.js') }}"></script>
+</body>
+</html>
