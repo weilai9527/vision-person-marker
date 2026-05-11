@@ -41,6 +41,7 @@ class VideoRecord(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     original_filename = db.Column(db.String(255), nullable=False)
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    detection_target = db.Column(db.String(20), default='person', nullable=False)
     video_path = db.Column(db.String(512), nullable=False)
     processed_video_path = db.Column(db.String(512), nullable=True)
     status = db.Column(db.String(20), default='pending')

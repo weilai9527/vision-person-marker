@@ -15,6 +15,10 @@ const uploadPreviewVideo = document.getElementById("uploadPreviewVideo");
 const uploadPreviewCaption = document.getElementById("uploadPreviewCaption");
 const videoStats = document.getElementById("videoStats");
 const currentPersons = document.getElementById("currentPersons");
+const pageConfig = document.body.dataset || {};
+const apiBase = pageConfig.videoApiBase || "/api/video";
+const sharedApiBase = pageConfig.sharedVideoApiBase || "/api/video";
+const detectionTarget = pageConfig.detectionTarget || "person";
 const allowedVideoExtensions = [".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"];
 const maxVideoSizeMB = 500;
 let progressTimer = null;
@@ -50,6 +54,26 @@ const text = {
     tooLarge: "\u6587\u4ef6\u8fc7\u5927\uff0c\u4e0d\u80fd\u8d85\u8fc7 500MB",
     uploadPreview: "\u4e0a\u4f20\u9884\u89c8",
 };
+
+const endpoints = {
+    history: `${apiBase}/history`,
+    upload: `${apiBase}/upload`,
+    progress: (recordId) => `${sharedApiBase}/progress/${recordId}`,
+    result: (recordId) => `${sharedApiBase}/result/${recordId}`,
+    frame: (recordId) => `${sharedApiBase}/frame/${recordId}`,
+    download: (recordId) => `${sharedApiBase}/download/${recordId}`,
+    delete: (recordId) => `${sharedApiBase}/delete/${recordId}`,
+};
+
+if (detectionTarget === "vehicle") {
+    Object.assign(text, {
+        currentPersons: "\u5f53\u524d\u753b\u9762\u8f66\u8f86\u6570",
+        noRecords: "\u6682\u65e0\u8f66\u8f86\u89c6\u9891\u8bb0\u5f55\u3002",
+        waiting: "\u7b49\u5f85\u4e0a\u4f20\u8f66\u8f86\u89c6\u9891",
+        starting: "\u5df2\u4e0a\u4f20\uff0c\u6b63\u5728\u5f00\u59cb\u8f66\u8f86\u68c0\u6d4b...",
+        annotationVideo: "\u8f66\u8f86\u62c9\u6846\u6807\u6ce8",
+    });
+}
 
 function formatFileSize(bytes) {
     if (!bytes) {
@@ -229,7 +253,7 @@ function startFramePreview(frameUrl, previewImage, playButton) {
 
             const totalFrames = Number(response.headers.get("X-Frame-Total") || 0);
             const fps = Number(response.headers.get("X-Fps") || 25);
-            const personCount = Number(response.headers.get("X-Person-Count") || 0);
+            const personCount = Number(response.headers.get("X-Detection-Count") || response.headers.get("X-Person-Count") || 0);
             const blob = await response.blob();
             if (token !== previewToken || isPaused) {
                 return;
@@ -279,7 +303,7 @@ function renderPlayer(result, recordId) {
         </section>
         <div class="record-actions">
             <button class="button-secondary" type="button" id="previewPlayButton">${text.pause}</button>
-            <a class="button-secondary" href="/api/video/download/${recordId}">${text.download}</a>
+            <a class="button-secondary" href="${endpoints.download(recordId)}">${text.download}</a>
         </div>
     `;
 
@@ -297,7 +321,7 @@ function renderPlayer(result, recordId) {
 }
 
 async function previewVideo(recordId) {
-    const response = await fetch(`/api/video/result/${recordId}`);
+    const response = await fetch(endpoints.result(recordId));
     const result = await response.json();
     if (!result.success) {
         alert(result.error || text.cannotPreview);
@@ -346,7 +370,7 @@ function bindDropzone() {
 }
 
 async function loadHistory() {
-    const response = await fetch("/api/video/history");
+    const response = await fetch(endpoints.history);
     const data = await response.json();
     if (!data.records.length) {
         historyList.textContent = text.noRecords;
@@ -361,7 +385,7 @@ async function loadHistory() {
             </div>
             <div class="record-actions">
                 ${record.has_result ? `<button class="button-secondary" type="button" data-preview-video="${record.id}">${text.preview}</button>` : ""}
-                ${record.has_result ? `<a class="button-secondary" href="/api/video/download/${record.id}">${text.download}</a>` : ""}
+                ${record.has_result ? `<a class="button-secondary" href="${endpoints.download(record.id)}">${text.download}</a>` : ""}
                 <button class="button-danger" type="button" data-delete-video="${record.id}">${text.delete}</button>
             </div>
         </article>
@@ -376,7 +400,7 @@ async function loadHistory() {
             if (!confirm(text.confirmDelete)) {
                 return;
             }
-            await fetch(`/api/video/delete/${button.dataset.deleteVideo}`, { method: "DELETE" });
+            await fetch(endpoints.delete(button.dataset.deleteVideo), { method: "DELETE" });
             stopPreviewPlayback();
             hideStats();
             videoResult.innerHTML = "";
@@ -387,7 +411,7 @@ async function loadHistory() {
 }
 
 async function pollProgress(recordId) {
-    const response = await fetch(`/api/video/progress/${recordId}`);
+    const response = await fetch(endpoints.progress(recordId));
     const progress = await response.json();
     setProgress(progress.progress || 0, progress.message || progress.status);
     if (progress.status === "completed") {
@@ -419,7 +443,7 @@ form.addEventListener("submit", async (event) => {
 
     const formData = new FormData();
     formData.append("video", selectedFile);
-    const response = await fetch("/api/video/upload", { method: "POST", body: formData });
+    const response = await fetch(endpoints.upload, { method: "POST", body: formData });
     const data = await response.json();
     if (!data.success) {
         submitButton.disabled = false;

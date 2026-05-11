@@ -1,17 +1,41 @@
 (function () {
     const video = document.getElementById("cameraVideo");
+    const detectVideo = document.getElementById("cameraDetectVideo");
     const startButton = document.getElementById("startCameraButton");
     const stopButton = document.getElementById("stopCameraButton");
     const cameraSelect = document.getElementById("cameraSelect");
     const statusText = document.getElementById("cameraStatusText");
     const statusDot = document.getElementById("cameraStatusDot");
     const placeholder = document.getElementById("cameraPlaceholder");
+    const detectPlaceholder = document.getElementById("cameraDetectPlaceholder");
     const hint = document.getElementById("cameraHint");
     const toast = document.getElementById("cameraToast");
+    const overlay = document.getElementById("cameraOverlay");
+    const monitorButton = document.getElementById("monitorCameraButton");
+    const recordButton = document.getElementById("recordCameraButton");
+    const personCountText = document.getElementById("cameraPersonCount");
+    const detectMeta = document.getElementById("cameraDetectMeta");
+    const recordPanel = document.getElementById("cameraRecordPanel");
+    const recordPreview = document.getElementById("cameraRecordPreview");
+    const recordDownload = document.getElementById("cameraRecordDownload");
+    const recordMeta = document.getElementById("cameraRecordMeta");
 
     let stream = null;
     let devices = [];
     let toastTimer = null;
+    let monitoring = false;
+    let detecting = false;
+    let detectTimer = null;
+    let lastDetection = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let recording = false;
+    let recordStartedAt = 0;
+    let recordTimer = null;
+    let recordUrl = null;
+    const captureCanvas = document.createElement("canvas");
+    const captureContext = captureCanvas.getContext("2d", { willReadFrequently: true });
+    const overlayContext = overlay.getContext("2d");
 
     function isSecureCameraContext() {
         const host = window.location.hostname;
@@ -34,14 +58,297 @@
 
     function setPlaceholder(visible) {
         placeholder.classList.toggle("is-hidden", !visible);
+        detectPlaceholder.classList.toggle("is-hidden", !visible);
+    }
+
+    function updateMonitorButton() {
+        monitorButton.disabled = !stream;
+        monitorButton.textContent = monitoring ? "暂停检测" : "实时检测";
+    }
+
+    function formatDuration(totalSeconds) {
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    function updateRecordButton() {
+        const supported = Boolean(window.MediaRecorder);
+        recordButton.disabled = !stream || !supported;
+        recordButton.textContent = recording ? `停止录像 ${formatDuration(Math.floor((Date.now() - recordStartedAt) / 1000))}` : "开始录像";
+        recordButton.classList.toggle("button-danger", recording);
+        recordButton.classList.toggle("button-secondary", !recording);
+    }
+
+    function getRecordingMimeType() {
+        const types = [
+            "video/webm;codecs=vp9",
+            "video/webm;codecs=vp8",
+            "video/webm",
+            "video/mp4",
+        ];
+        return types.find((type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || "";
+    }
+
+    function clearRecordingUrl() {
+        if (recordUrl) {
+            URL.revokeObjectURL(recordUrl);
+        }
+        recordUrl = null;
+    }
+
+    function resizeOverlay() {
+        const rect = overlay.getBoundingClientRect();
+        const ratio = window.devicePixelRatio || 1;
+        const width = Math.max(1, Math.round(rect.width * ratio));
+        const height = Math.max(1, Math.round(rect.height * ratio));
+
+        if (overlay.width !== width || overlay.height !== height) {
+            overlay.width = width;
+            overlay.height = height;
+        }
+
+        overlayContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+        return rect;
+    }
+
+    function clearDetections() {
+        const rect = resizeOverlay();
+        overlayContext.clearRect(0, 0, rect.width, rect.height);
+        lastDetection = null;
+        personCountText.textContent = "0";
+    }
+
+    function drawDetections(detection) {
+        const rect = resizeOverlay();
+        overlayContext.clearRect(0, 0, rect.width, rect.height);
+
+        if (!detection || !detection.width || !detection.height) {
+            return;
+        }
+
+        const scale = Math.min(rect.width / detection.width, rect.height / detection.height);
+        const drawWidth = detection.width * scale;
+        const drawHeight = detection.height * scale;
+        const offsetX = (rect.width - drawWidth) / 2;
+        const offsetY = (rect.height - drawHeight) / 2;
+
+        overlayContext.lineWidth = 2;
+        overlayContext.font = "13px Microsoft YaHei, Arial, sans-serif";
+        overlayContext.textBaseline = "top";
+
+        detection.boxes.forEach((box, index) => {
+            const x = offsetX + box.x1 * scale;
+            const y = offsetY + box.y1 * scale;
+            const width = (box.x2 - box.x1) * scale;
+            const height = (box.y2 - box.y1) * scale;
+            const label = `${index + 1}`;
+            const labelWidth = overlayContext.measureText(label).width + 12;
+
+            overlayContext.strokeStyle = "#00d46a";
+            overlayContext.fillStyle = "rgba(0, 212, 106, 0.16)";
+            overlayContext.strokeRect(x, y, width, height);
+            overlayContext.fillRect(x, y, width, height);
+
+            overlayContext.fillStyle = "#00a656";
+            overlayContext.fillRect(x, Math.max(0, y - 20), labelWidth, 20);
+            overlayContext.fillStyle = "#ffffff";
+            overlayContext.fillText(label, x + 6, Math.max(0, y - 17));
+        });
+    }
+
+    function captureFrameBlob() {
+        const sourceWidth = video.videoWidth;
+        const sourceHeight = video.videoHeight;
+
+        if (!sourceWidth || !sourceHeight) {
+            return Promise.resolve(null);
+        }
+
+        const maxSide = 960;
+        const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+        captureCanvas.width = Math.max(1, Math.round(sourceWidth * scale));
+        captureCanvas.height = Math.max(1, Math.round(sourceHeight * scale));
+        captureContext.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+
+        return new Promise((resolve) => {
+            captureCanvas.toBlob(resolve, "image/jpeg", 0.74);
+        });
+    }
+
+    function stopMonitoring(resetView = true) {
+        monitoring = false;
+        window.clearTimeout(detectTimer);
+        detectTimer = null;
+        detecting = false;
+        updateMonitorButton();
+
+        if (resetView) {
+            clearDetections();
+            detectMeta.textContent = "未开始实时检测";
+        }
+    }
+
+    async function detectFrame() {
+        if (!monitoring || detecting || !stream) {
+            return;
+        }
+
+        detecting = true;
+        detectMeta.textContent = "正在检测当前画面...";
+
+        try {
+            const blob = await captureFrameBlob();
+            if (!blob) {
+                detectMeta.textContent = "等待摄像头画面稳定";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("frame", blob, "camera-frame.jpg");
+
+            const response = await fetch("/api/camera/detect", {
+                method: "POST",
+                body: formData,
+                cache: "no-store",
+            });
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || "检测失败");
+            }
+
+            lastDetection = data;
+            personCountText.textContent = String(data.person_count || 0);
+            detectMeta.textContent = `YOLO 实时检测，耗时 ${data.elapsed_ms || 0} ms`;
+            drawDetections(data);
+        } catch (error) {
+            detectMeta.textContent = error.message || "实时检测失败";
+        } finally {
+            detecting = false;
+            if (monitoring && stream) {
+                detectTimer = window.setTimeout(detectFrame, 900);
+            }
+        }
+    }
+
+    function startMonitoring() {
+        if (!stream || monitoring) {
+            return;
+        }
+
+        monitoring = true;
+        updateMonitorButton();
+        detectFrame();
+    }
+
+    function toggleMonitoring() {
+        if (monitoring) {
+            stopMonitoring(false);
+            detectMeta.textContent = "实时检测已暂停";
+        } else {
+            startMonitoring();
+        }
     }
 
     function stopCurrentStream() {
+        stopRecording(false);
+        stopMonitoring(true);
         if (stream) {
             stream.getTracks().forEach((track) => track.stop());
         }
         stream = null;
         video.srcObject = null;
+        detectVideo.srcObject = null;
+        updateMonitorButton();
+        updateRecordButton();
+    }
+
+    function finishRecording() {
+        window.clearInterval(recordTimer);
+        recordTimer = null;
+        recording = false;
+        updateRecordButton();
+
+        if (recordedChunks.length === 0) {
+            recordMeta.textContent = "没有生成有效录像";
+            mediaRecorder = null;
+            return;
+        }
+
+        clearRecordingUrl();
+        const mimeType = recordedChunks[0].type || "video/webm";
+        const blob = new Blob(recordedChunks, { type: mimeType });
+        recordUrl = URL.createObjectURL(blob);
+        const duration = Math.max(1, Math.round((Date.now() - recordStartedAt) / 1000));
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+        recordPreview.src = recordUrl;
+        recordDownload.href = recordUrl;
+        recordDownload.download = `camera-recording-${timestamp}.webm`;
+        recordMeta.textContent = `时长 ${formatDuration(duration)}，大小 ${(blob.size / 1024 / 1024).toFixed(2)} MB`;
+        recordPanel.hidden = false;
+        mediaRecorder = null;
+    }
+
+    function startRecording() {
+        if (!stream || recording) {
+            return;
+        }
+
+        if (!window.MediaRecorder) {
+            showToast("当前浏览器不支持录像", "error");
+            return;
+        }
+
+        try {
+            const mimeType = getRecordingMimeType();
+            recordedChunks = [];
+            clearRecordingUrl();
+            mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+            mediaRecorder.addEventListener("dataavailable", (event) => {
+                if (event.data && event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            });
+            mediaRecorder.addEventListener("stop", finishRecording);
+            mediaRecorder.start(1000);
+
+            recording = true;
+            recordStartedAt = Date.now();
+            recordPanel.hidden = true;
+            updateRecordButton();
+            recordTimer = window.setInterval(updateRecordButton, 500);
+            showToast("录像已开始", "success");
+        } catch (error) {
+            recording = false;
+            updateRecordButton();
+            showToast(error.message || "录像启动失败", "error");
+        }
+    }
+
+    function stopRecording(showNotice = true) {
+        window.clearInterval(recordTimer);
+        recordTimer = null;
+
+        if (!mediaRecorder || mediaRecorder.state === "inactive") {
+            recording = false;
+            updateRecordButton();
+            return;
+        }
+
+        mediaRecorder.stop();
+        if (showNotice) {
+            showToast("录像已停止", "success");
+        }
+    }
+
+    function toggleRecording() {
+        if (recording) {
+            stopRecording(true);
+        } else {
+            startRecording();
+        }
     }
 
     function renderDeviceOptions() {
@@ -98,13 +405,16 @@
             });
 
             video.srcObject = stream;
-            await video.play();
+            detectVideo.srcObject = stream;
+            await Promise.all([video.play(), detectVideo.play()]);
 
             setPlaceholder(false);
             startButton.disabled = true;
             stopButton.disabled = false;
+            monitorButton.disabled = false;
+            recordButton.disabled = !window.MediaRecorder;
             cameraSelect.disabled = true;
-            hint.textContent = "摄像头正在预览中。";
+            hint.textContent = "摄像头正在实时检测中。";
             showToast("摄像头已开启", "success");
 
             await refreshDevices();
@@ -117,6 +427,7 @@
             }
 
             stream.getVideoTracks()[0].addEventListener("ended", stopCamera);
+            startMonitoring();
         } catch (error) {
             handleCameraError(error);
         }
@@ -127,6 +438,8 @@
         setPlaceholder(true);
         startButton.disabled = devices.length === 0;
         stopButton.disabled = true;
+        monitorButton.disabled = true;
+        recordButton.disabled = true;
         cameraSelect.disabled = devices.length === 0;
         hint.textContent = "浏览器会在开始时请求摄像头权限。";
         setStatus(devices.length > 0 ? "已停止" : "未检测到摄像头", devices.length > 0 ? "idle" : "error");
@@ -153,6 +466,7 @@
     async function init() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             startButton.disabled = true;
+            recordButton.disabled = true;
             cameraSelect.disabled = true;
             setStatus("浏览器不支持", "error");
             showToast("请使用最新版 Chrome、Edge、Firefox 或 Safari", "error");
@@ -161,6 +475,7 @@
 
         if (!isSecureCameraContext()) {
             startButton.disabled = true;
+            recordButton.disabled = true;
             cameraSelect.disabled = true;
             setStatus("需要安全环境", "error");
             showToast("摄像头功能需要在 localhost 或 HTTPS 下使用", "error");
@@ -180,8 +495,20 @@
     }
 
     startButton.addEventListener("click", startCamera);
+    monitorButton.addEventListener("click", toggleMonitoring);
+    recordButton.addEventListener("click", toggleRecording);
     stopButton.addEventListener("click", stopCamera);
-    window.addEventListener("beforeunload", stopCurrentStream);
+    window.addEventListener("beforeunload", () => {
+        clearRecordingUrl();
+        stopCurrentStream();
+    });
+    window.addEventListener("resize", () => {
+        if (lastDetection) {
+            drawDetections(lastDetection);
+        } else {
+            resizeOverlay();
+        }
+    });
 
     init();
 })();

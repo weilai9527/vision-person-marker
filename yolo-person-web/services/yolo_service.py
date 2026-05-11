@@ -73,25 +73,45 @@ def run_yolo_detection(
     imgsz: int | None = None,
     min_area: int | None = None,
 ) -> tuple[list[dict], int, int]:
-    model = get_yolo_model()
-    class_ids = class_ids or DEFAULT_PERSON_CLASS_IDS
-
     with Image.open(image_path) as image:
         image = ImageOps.exif_transpose(image).convert("RGB")
-        width, height = image.size
-        predict_kwargs = {
-            "source": image,
-            "classes": class_ids,
-            "conf": YOLO_CONF if conf is None else conf,
-            "iou": YOLO_IOU if iou is None else iou,
-            "imgsz": YOLO_IMGSZ if imgsz is None else imgsz,
-            "max_det": 300,
-            "verbose": False,
-        }
-        device = resolve_yolo_device()
-        if device:
-            predict_kwargs["device"] = device
-        results = model.predict(**predict_kwargs)
+        return run_yolo_detection_on_image(
+            image,
+            class_ids=class_ids,
+            target_label=target_label,
+            conf=conf,
+            iou=iou,
+            imgsz=imgsz,
+            min_area=min_area,
+        )
+
+
+def run_yolo_detection_on_image(
+    image: Image.Image,
+    class_ids: list[int] | None = None,
+    target_label: str = "person",
+    conf: float | None = None,
+    iou: float | None = None,
+    imgsz: int | None = None,
+    min_area: int | None = None,
+) -> tuple[list[dict], int, int]:
+    model = get_yolo_model()
+    class_ids = class_ids or DEFAULT_PERSON_CLASS_IDS
+    image = ImageOps.exif_transpose(image).convert("RGB")
+    width, height = image.size
+    predict_kwargs = {
+        "source": image,
+        "classes": class_ids,
+        "conf": YOLO_CONF if conf is None else conf,
+        "iou": YOLO_IOU if iou is None else iou,
+        "imgsz": YOLO_IMGSZ if imgsz is None else imgsz,
+        "max_det": 300,
+        "verbose": False,
+    }
+    device = resolve_yolo_device()
+    if device:
+        predict_kwargs["device"] = device
+    results = model.predict(**predict_kwargs)
 
     boxes = []
     result = results[0]

@@ -11,15 +11,35 @@ from config import (
     VIDEO_TARGET_FPS,
     VIDEO_USE_TRACKER,
     YOLO_CONF,
-    YOLO_DEVICE,
     YOLO_IMGSZ,
     YOLO_IOU,
 )
 from models import VideoRecord, db
-from services.yolo_service import get_yolo_model, resolve_yolo_device
+from services.yolo_service import (
+    DEFAULT_PERSON_CLASS_IDS,
+    VEHICLE_CLASS_IDS,
+    VEHICLE_CLASS_LABELS,
+    get_yolo_model,
+    resolve_yolo_device,
+)
 
 _progress = {}
 _progress_lock = threading.Lock()
+
+VIDEO_DETECTION_TARGETS = {
+    "person": {
+        "class_ids": DEFAULT_PERSON_CLASS_IDS,
+        "box_color": (22, 163, 74),
+    },
+    "vehicle": {
+        "class_ids": VEHICLE_CLASS_IDS,
+        "box_color": (15, 118, 110),
+    },
+}
+
+
+def get_video_detection_target(target: str | None) -> dict:
+    return VIDEO_DETECTION_TARGETS.get(target or "person", VIDEO_DETECTION_TARGETS["person"])
 
 
 def allowed_video_file(filename: str) -> bool:
@@ -30,31 +50,64 @@ def update_video_progress(video_id: int, **updates) -> None:
     with _progress_lock:
         current = _progress.setdefault(
             video_id,
-            {"status": "unknown", "progress": 0, "current_frame": 0, "total_frames": 0, "message": ""},
+            {
+                "status": "unknown",
+                "progress": 0,
+                "current_frame": 0,
+                "total_frames": 0,
+                "current_person_count": 0,
+                "current_count": 0,
+                "total_persons": 0,
+                "total_count": 0,
+                "detection_target": "person",
+                "message": "",
+            },
         )
         current.update(updates)
 
 
 def get_video_progress(video_id: int) -> dict:
     with _progress_lock:
-        return dict(_progress.get(video_id, {
-            "status": "unknown",
-            "progress": 0,
-            "current_frame": 0,
-            "total_frames": 0,
-            "current_person_count": 0,
-            "total_persons": 0,
-            "message": "",
-        }))
+        return dict(
+            _progress.get(
+                video_id,
+                {
+                    "status": "unknown",
+                    "progress": 0,
+                    "current_frame": 0,
+                    "total_frames": 0,
+                    "current_person_count": 0,
+                    "current_count": 0,
+                    "total_persons": 0,
+                    "total_count": 0,
+                    "detection_target": "person",
+                    "message": "",
+                },
+            )
+        )
 
 
 def get_video_count_metadata_path(video_path: Path) -> Path:
     return video_path.with_suffix(".counts.json")
 
 
-def save_video_count_metadata(video_path: Path, fps: float, person_counts: list[int]) -> None:
+def save_video_count_metadata(
+    video_path: Path,
+    fps: float,
+    person_counts: list[int],
+    detection_target: str = "person",
+) -> None:
     get_video_count_metadata_path(video_path).write_text(
-        json.dumps({"fps": fps, "person_counts": person_counts}, ensure_ascii=False),
+        json.dumps(
+            {
+                "version": 2,
+                "fps": fps,
+                "detection_target": detection_target,
+                "person_counts": person_counts,
+                "counts": person_counts,
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
 
@@ -62,17 +115,18 @@ def save_video_count_metadata(video_path: Path, fps: float, person_counts: list[
 def load_video_count_metadata(video_path: Path) -> dict:
     metadata_path = get_video_count_metadata_path(video_path)
     if not metadata_path.exists():
-        return {"fps": 0, "person_counts": []}
+        return {"fps": 0, "person_counts": [], "detection_target": "person"}
     try:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"fps": 0, "person_counts": []}
-    person_counts = metadata.get("person_counts")
+        return {"fps": 0, "person_counts": [], "detection_target": "person"}
+    person_counts = metadata.get("person_counts") or metadata.get("counts")
     if not isinstance(person_counts, list):
         person_counts = []
     return {
         "fps": float(metadata.get("fps") or 0),
         "person_counts": [int(count or 0) for count in person_counts],
+        "detection_target": metadata.get("detection_target") or "person",
     }
 
 
@@ -80,7 +134,7 @@ def _require_cv2():
     try:
         import cv2
     except ImportError as exc:
-        raise RuntimeError("缺少 opencv-python，请先安装后再处理视频。") from exc
+        raise RuntimeError("Missing opencv-python. Install it before processing video.") from exc
     return cv2
 
 
@@ -88,7 +142,7 @@ def get_video_info(video_path: Path) -> dict:
     cv2 = _require_cv2()
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise ValueError("无法打开视频文件")
+        raise ValueError("Cannot open video file")
     try:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         fps = float(cap.get(cv2.CAP_PROP_FPS) or 0)
@@ -104,26 +158,39 @@ def _extract_detections(result) -> list[dict]:
     detections = []
     if result.boxes is None:
         return detections
+
     xyxy_list = result.boxes.xyxy.cpu().tolist()
     conf_list = result.boxes.conf.cpu().tolist()
-    for xyxy, confidence in zip(xyxy_list, conf_list):
+    cls_list = result.boxes.cls.cpu().tolist() if result.boxes.cls is not None else [None] * len(xyxy_list)
+    names = getattr(result, "names", {}) or {}
+
+    for xyxy, confidence, class_id in zip(xyxy_list, conf_list, cls_list):
         x1, y1, x2, y2 = [int(round(value)) for value in xyxy]
         if x2 <= x1 or y2 <= y1:
             continue
-        detections.append({"box": (x1, y1, x2, y2), "conf": float(confidence)})
+        class_id = int(class_id) if class_id is not None else None
+        class_name = VEHICLE_CLASS_LABELS.get(class_id) or names.get(class_id) or "person"
+        detections.append(
+            {
+                "box": (x1, y1, x2, y2),
+                "conf": float(confidence),
+                "class_id": class_id,
+                "class_name": class_name,
+            }
+        )
     return detections
 
 
-def _draw_detections(frame, detections, cv2):
+def _draw_detections(frame, detections, cv2, box_color) -> None:
     for index, det in enumerate(detections, start=1):
         x1, y1, x2, y2 = det["box"]
         conf = det["conf"]
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (22, 163, 74), 2)
-        label = f"{index} {conf:.2f}"
+        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+        label = f"{det.get('class_name') or index} {conf:.2f}"
         label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
         label_w, label_h = label_size
         top = max(0, y1 - label_h - 8)
-        cv2.rectangle(frame, (x1, top), (x1 + label_w + 10, top + label_h + 8), (22, 163, 74), -1)
+        cv2.rectangle(frame, (x1, top), (x1 + label_w + 10, top + label_h + 8), box_color, -1)
         cv2.putText(frame, label, (x1 + 5, top + label_h + 3), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
 
 
@@ -131,19 +198,29 @@ def process_video_detection(video_id: int) -> None:
     cv2 = _require_cv2()
     record = db.session.get(VideoRecord, video_id)
     if record is None:
-        update_video_progress(video_id, status="failed", message="视频记录不存在")
+        update_video_progress(video_id, status="failed", message="Video record not found")
         return
 
     video_path = Path(record.video_path)
     output_path = VIDEO_RESULT_DIR / f"{uuid4().hex}.mp4"
     model = get_yolo_model()
+    detection_target = getattr(record, "detection_target", "person") or "person"
+    target_options = get_video_detection_target(detection_target)
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise ValueError("无法打开视频文件")
+        raise ValueError("Cannot open video file")
 
     record.status = "processing"
     db.session.commit()
-    update_video_progress(video_id, status="processing", progress=0, current_frame=0, total_frames=record.total_frames or 0, message="正在处理视频...")
+    update_video_progress(
+        video_id,
+        status="processing",
+        progress=0,
+        current_frame=0,
+        total_frames=record.total_frames or 0,
+        detection_target=detection_target,
+        message="Processing video...",
+    )
 
     writer = None
     processed = 0
@@ -160,7 +237,7 @@ def process_video_detection(video_id: int) -> None:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
         if not writer.isOpened():
-            raise ValueError("无法创建视频输出文件")
+            raise ValueError("Cannot create output video file")
 
         while True:
             frames = []
@@ -174,7 +251,7 @@ def process_video_detection(video_id: int) -> None:
 
             predict_kwargs = {
                 "source": frames,
-                "classes": [0],
+                "classes": target_options["class_ids"],
                 "conf": YOLO_CONF,
                 "iou": YOLO_IOU,
                 "imgsz": YOLO_IMGSZ,
@@ -190,7 +267,7 @@ def process_video_detection(video_id: int) -> None:
                 detections = _extract_detections(result)
                 current_person_count = len(detections)
                 frame_person_counts.append(current_person_count)
-                _draw_detections(frame, detections, cv2)
+                _draw_detections(frame, detections, cv2, target_options["box_color"])
                 writer.write(frame)
                 processed += 1
                 total_persons = max(total_persons, current_person_count)
@@ -209,8 +286,11 @@ def process_video_detection(video_id: int) -> None:
                         current_frame=processed,
                         total_frames=record.total_frames or 0,
                         current_person_count=current_person_count,
+                        current_count=current_person_count,
                         total_persons=total_persons,
-                        message=f"已处理 {processed}/{record.total_frames or '?'} 帧",
+                        total_count=total_persons,
+                        detection_target=detection_target,
+                        message=f"Processed {processed}/{record.total_frames or '?'} frames",
                     )
 
         avg_confidence = confidence_sum / confidence_count if confidence_count else 0.0
@@ -219,14 +299,27 @@ def process_video_detection(video_id: int) -> None:
         record.processed_frames = processed
         record.total_persons = total_persons
         record.avg_confidence = avg_confidence
-        save_video_count_metadata(output_path, fps, frame_person_counts)
+        save_video_count_metadata(output_path, fps, frame_person_counts, detection_target)
         db.session.commit()
-        update_video_progress(video_id, status="completed", progress=100, current_frame=processed, total_frames=record.total_frames or processed, message="处理完成")
+        final_count = frame_person_counts[-1] if frame_person_counts else 0
+        update_video_progress(
+            video_id,
+            status="completed",
+            progress=100,
+            current_frame=processed,
+            total_frames=record.total_frames or processed,
+            current_person_count=final_count,
+            current_count=final_count,
+            total_persons=total_persons,
+            total_count=total_persons,
+            detection_target=detection_target,
+            message="Processing complete",
+        )
     except Exception as exc:
         record.status = "failed"
         record.error_message = str(exc)
         db.session.commit()
-        update_video_progress(video_id, status="failed", message=str(exc))
+        update_video_progress(video_id, status="failed", message=str(exc), detection_target=detection_target)
         if output_path.exists():
             output_path.unlink(missing_ok=True)
         raise

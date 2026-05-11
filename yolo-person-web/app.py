@@ -1,12 +1,14 @@
 import json
 import logging
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
 from flask import Flask, render_template, request, url_for, Response, jsonify, stream_with_context, send_file
 from PIL import Image
+from sqlalchemy import text
 
 from config import (
     BASE_DIR,
@@ -29,7 +31,7 @@ from config import (
 from models import db, ImageRecord, VideoRecord
 from services.image_service import draw_person_boxes, draw_vehicle_boxes
 from services.llm_service import call_yolo_judge_model
-from services.yolo_service import VEHICLE_CLASS_IDS, call_local_yolo, is_complex_person_scene, run_yolo_detection
+from services.yolo_service import VEHICLE_CLASS_IDS, call_local_yolo, is_complex_person_scene, run_yolo_detection, run_yolo_detection_on_image
 from services.video_service import (
     process_video_detection,
     get_video_progress,
@@ -53,8 +55,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def ensure_video_record_columns() -> None:
+    columns = {
+        row[1]
+        for row in db.session.execute(text("PRAGMA table_info(video_record)")).fetchall()
+    }
+    if "detection_target" not in columns:
+        db.session.execute(
+            text("ALTER TABLE video_record ADD COLUMN detection_target VARCHAR(20) NOT NULL DEFAULT 'person'")
+        )
+        db.session.commit()
+
+
 with app.app_context():
     db.create_all()
+    ensure_video_record_columns()
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
@@ -298,6 +314,37 @@ def camera_page():
     return render_template("camera.html")
 
 
+@app.route("/api/camera/detect", methods=["POST"])
+def camera_detect():
+    frame = request.files.get("frame")
+    if frame is None or frame.filename == "":
+        return jsonify({"success": False, "error": "No camera frame provided"}), 400
+
+    started_at = time.perf_counter()
+    try:
+        with Image.open(frame.stream) as image:
+            boxes, width, height = run_yolo_detection_on_image(
+                image,
+                conf=0.22,
+                iou=0.50,
+                imgsz=640,
+                min_area=35,
+            )
+    except Exception as exc:
+        logger.exception("摄像头实时检测失败")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+    return jsonify({
+        "success": True,
+        "person_count": len(boxes),
+        "boxes": boxes,
+        "width": width,
+        "height": height,
+        "elapsed_ms": elapsed_ms,
+    })
+
+
 @app.route("/vehicle", methods=["GET", "POST"])
 def vehicle_page():
     error = None
@@ -479,34 +526,36 @@ def video_page():
     return render_template("video.html")
 
 
-@app.route("/api/video/history")
-def video_history():
+def serialize_video_record(record: VideoRecord) -> dict:
+    return {
+        "id": record.id,
+        "original_filename": record.original_filename,
+        "uploaded_at": record.uploaded_at.strftime("%Y-%m-%d %H:%M:%S") if record.uploaded_at else "",
+        "status": record.status,
+        "detection_target": record.detection_target,
+        "total_frames": record.total_frames,
+        "processed_frames": record.processed_frames,
+        "fps": record.fps,
+        "duration": record.duration,
+        "total_persons": record.total_persons,
+        "total_count": record.total_persons,
+        "avg_confidence": record.avg_confidence,
+        "video_width": record.video_width,
+        "video_height": record.video_height,
+        "error_message": record.error_message,
+        "has_result": bool(record.processed_video_path and Path(record.processed_video_path).exists()),
+    }
+
+
+def video_history_response(detection_target: str):
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 10, type=int)
     per_page = min(per_page, 50)
-    pagination = VideoRecord.query.order_by(VideoRecord.uploaded_at.desc()).paginate(
+    pagination = VideoRecord.query.filter_by(detection_target=detection_target).order_by(VideoRecord.uploaded_at.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
-    records = []
-    for record in pagination.items:
-        records.append({
-            "id": record.id,
-            "original_filename": record.original_filename,
-            "uploaded_at": record.uploaded_at.strftime("%Y-%m-%d %H:%M:%S") if record.uploaded_at else "",
-            "status": record.status,
-            "total_frames": record.total_frames,
-            "processed_frames": record.processed_frames,
-            "fps": record.fps,
-            "duration": record.duration,
-            "total_persons": record.total_persons,
-            "avg_confidence": record.avg_confidence,
-            "video_width": record.video_width,
-            "video_height": record.video_height,
-            "error_message": record.error_message,
-            "has_result": bool(record.processed_video_path and Path(record.processed_video_path).exists()),
-        })
     return jsonify({
-        "records": records,
+        "records": [serialize_video_record(record) for record in pagination.items],
         "page": pagination.page,
         "pages": pagination.pages,
         "total": pagination.total,
@@ -515,8 +564,38 @@ def video_history():
     })
 
 
-@app.route("/api/video/upload", methods=["POST"])
-def video_upload():
+@app.route("/api/video/history")
+def video_history():
+    return video_history_response("person")
+
+
+@app.route("/api/vehicle/video/history")
+def vehicle_video_history():
+    return video_history_response("vehicle")
+
+
+def start_video_processing_thread(record_id: int) -> None:
+    def run_video_processing(video_id):
+        with app.app_context():
+            try:
+                process_video_detection(video_id)
+            except Exception as exc:
+                logger.exception(f"Fatal error in video processing thread for record {video_id}")
+                update_video_progress(video_id, status="failed", message=f"Fatal error: {exc}")
+                try:
+                    rec = db.session.get(VideoRecord, video_id)
+                    if rec:
+                        rec.status = "failed"
+                        rec.error_message = str(exc)
+                        db.session.commit()
+                except Exception:
+                    db.session.rollback()
+
+    thread = threading.Thread(target=run_video_processing, args=(record_id,), daemon=True)
+    thread.start()
+
+
+def handle_video_upload(detection_target: str):
     file = request.files.get("video")
     if file is None or file.filename == "":
         return jsonify({"success": False, "error": "Please select a video file"}), 400
@@ -550,6 +629,7 @@ def video_upload():
 
     record = VideoRecord(
         original_filename=file.filename,
+        detection_target=detection_target,
         video_path=str(upload_path),
         status="pending",
         total_frames=video_info["total_frames"],
@@ -560,25 +640,7 @@ def video_upload():
     )
     db.session.add(record)
     db.session.commit()
-
-    def run_video_processing(video_id):
-        with app.app_context():
-            try:
-                process_video_detection(video_id)
-            except Exception as exc:
-                logger.exception(f"Fatal error in video processing thread for record {video_id}")
-                update_video_progress(video_id, status="failed", message=f"Fatal error: {exc}")
-                try:
-                    rec = db.session.get(VideoRecord, video_id)
-                    if rec:
-                        rec.status = "failed"
-                        rec.error_message = str(exc)
-                        db.session.commit()
-                except Exception:
-                    db.session.rollback()
-
-    thread = threading.Thread(target=run_video_processing, args=(record.id,), daemon=True)
-    thread.start()
+    start_video_processing_thread(record.id)
 
     return jsonify({
         "success": True,
@@ -588,11 +650,22 @@ def video_upload():
     })
 
 
+@app.route("/api/video/upload", methods=["POST"])
+def video_upload():
+    return handle_video_upload("person")
+
+
+@app.route("/api/vehicle/video/upload", methods=["POST"])
+def vehicle_video_upload():
+    return handle_video_upload("vehicle")
+
+
 @app.route("/api/video/progress/<int:video_id>")
 def video_progress(video_id):
     progress = get_video_progress(video_id)
     record = db.session.get(VideoRecord, video_id)
     if record:
+        progress["detection_target"] = record.detection_target or "person"
         if progress["status"] == "unknown" or progress["status"] == "processing":
             progress["status"] = record.status
         if progress["total_frames"] == 0 and record.total_frames:
@@ -655,8 +728,11 @@ def video_result_url(video_id):
         "stream_url": url_for("video_stream", video_id=video_id),
         "frame_url": url_for("video_frame", video_id=video_id),
         "filename": record.original_filename,
+        "detection_target": record.detection_target,
         "current_person_count": first_frame_count,
+        "current_count": first_frame_count,
         "total_persons": record.total_persons or 0,
+        "total_count": record.total_persons or 0,
     })
 
 
@@ -702,6 +778,8 @@ def video_frame(video_id):
         response = Response(buffer.tobytes(), mimetype="image/jpeg")
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Person-Count"] = str(person_count)
+        response.headers["X-Detection-Count"] = str(person_count)
+        response.headers["X-Detection-Target"] = record.detection_target or "person"
         response.headers["X-Frame-Index"] = str(frame_index)
         response.headers["X-Frame-Total"] = str(total_frames)
         response.headers["X-Fps"] = str(fps)
