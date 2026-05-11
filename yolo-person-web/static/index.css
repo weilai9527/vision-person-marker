@@ -202,6 +202,16 @@ form {
     box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.10);
 }
 
+.dropzone.is-selected {
+    border-color: rgba(15, 118, 110, 0.78);
+    background: linear-gradient(180deg, #f3fbfa 0%, #ffffff 100%);
+}
+
+.dropzone.is-error {
+    border-color: rgba(180, 35, 24, 0.70);
+    background: #fff7f6;
+}
+
 .dropzone input[type="file"] {
     position: absolute;
     inset: 0;
@@ -213,6 +223,65 @@ form {
     display: grid;
     gap: 8px;
     justify-items: center;
+}
+
+.video-dropzone {
+    min-height: 300px;
+    overflow: hidden;
+}
+
+.video-dropzone input[type="file"] {
+    inset: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.video-dropzone.has-preview {
+    padding: 12px;
+    background: #101820;
+}
+
+.video-dropzone.has-preview .dropzone-main {
+    display: none;
+}
+
+.upload-video-preview {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    min-height: 276px;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.upload-video-preview[hidden] {
+    display: none;
+}
+
+.upload-video-preview video {
+    width: 100%;
+    height: min(46vw, 420px);
+    min-height: 260px;
+    max-height: 420px;
+    object-fit: contain;
+    border-radius: 6px;
+    background: #101820;
+}
+
+.upload-preview-caption {
+    display: block;
+    max-width: 100%;
+    color: #d9e3ea;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .upload-mark {
@@ -245,13 +314,38 @@ form {
     gap: 14px;
 }
 
+.video-file-row {
+    min-height: 58px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-soft);
+}
+
+.selected-file {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
 .file-name {
     min-width: 0;
-    color: var(--muted);
+    color: var(--text);
     font-size: 14px;
+    font-weight: 700;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.file-meta {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.file-meta.error {
+    color: var(--danger);
 }
 
 .preview-surface {
@@ -483,6 +577,13 @@ form {
     gap: 16px;
 }
 
+.progress-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
 .progress-bar {
     height: 12px;
     overflow: hidden;
@@ -499,9 +600,74 @@ form {
     transition: width 0.25s ease;
 }
 
+.progress-percent {
+    min-width: 46px;
+    color: var(--primary-dark);
+    font-size: 14px;
+    line-height: 1;
+    text-align: right;
+}
+
 .video-result {
     display: grid;
     gap: 12px;
+}
+
+.video-stats {
+    display: grid;
+    gap: 10px;
+}
+
+.video-stat {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-soft);
+}
+
+.video-stat span {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.video-stat strong {
+    display: block;
+    font-size: 24px;
+    line-height: 1;
+}
+
+.video-stat-primary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+}
+
+.video-stat-primary span {
+    margin-bottom: 0;
+    font-size: 15px;
+}
+
+.video-stat-primary strong {
+    font-size: 42px;
+}
+
+.preview-player {
+    display: grid;
+    gap: 8px;
+}
+
+.preview-player h3 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+.fullscreen-preview {
+    cursor: zoom-in;
 }
 
 .video-result video {
@@ -509,6 +675,29 @@ form {
     max-height: 360px;
     border-radius: 8px;
     background: #101820;
+}
+
+.fullscreen-preview:fullscreen,
+.fullscreen-preview:-webkit-full-screen {
+    width: 100vw;
+    height: 100vh;
+    padding: 0;
+    background: #101820;
+    cursor: zoom-out;
+    place-items: center;
+}
+
+.fullscreen-preview:fullscreen h3,
+.fullscreen-preview:-webkit-full-screen h3 {
+    display: none;
+}
+
+.fullscreen-preview:fullscreen .stream-preview,
+.fullscreen-preview:-webkit-full-screen .stream-preview {
+    width: 100vw;
+    height: 100vh;
+    max-height: none;
+    border-radius: 0;
 }
 
 .stream-preview {

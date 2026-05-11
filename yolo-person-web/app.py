@@ -35,6 +35,8 @@ from services.video_service import (
     update_video_progress,
     allowed_video_file,
     get_video_info,
+    get_video_count_metadata_path,
+    load_video_count_metadata,
 )
 
 app = Flask(__name__)
@@ -517,12 +519,69 @@ def video_result_url(video_id):
     static_dir = BASE_DIR / "static"
     relative_path = video_path.relative_to(static_dir)
     url = url_for("static", filename=str(relative_path.as_posix()))
+    progress = get_video_progress(video_id)
+    metadata = load_video_count_metadata(video_path)
+    person_counts = metadata["person_counts"]
+    first_frame_count = person_counts[0] if person_counts else (progress.get("current_person_count") or record.total_persons or 0)
     return jsonify({
         "success": True,
         "url": url,
         "stream_url": url_for("video_stream", video_id=video_id),
+        "frame_url": url_for("video_frame", video_id=video_id),
         "filename": record.original_filename,
+        "current_person_count": first_frame_count,
+        "total_persons": record.total_persons or 0,
     })
+
+
+@app.route("/api/video/frame/<int:video_id>")
+def video_frame(video_id):
+    record = db.session.get(VideoRecord, video_id)
+    if record is None:
+        return jsonify({"success": False, "error": "Record not found"}), 404
+
+    if record.status != "completed" or not record.processed_video_path:
+        return jsonify({"success": False, "error": "Video not yet processed"}), 400
+
+    video_path = Path(record.processed_video_path)
+    if not video_path.exists():
+        return jsonify({"success": False, "error": "Processed video file not found"}), 404
+
+    import cv2
+
+    metadata = load_video_count_metadata(video_path)
+    person_counts = metadata["person_counts"]
+    cap = cv2.VideoCapture(str(video_path))
+    try:
+        if not cap.isOpened():
+            return jsonify({"success": False, "error": "Cannot open processed video"}), 500
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or record.processed_frames or 0)
+        if total_frames <= 0:
+            return jsonify({"success": False, "error": "Processed video has no frames"}), 404
+
+        frame_index = request.args.get("frame", 0, type=int)
+        frame_index = max(0, min(frame_index, total_frames - 1))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ok, frame = cap.read()
+        if not ok:
+            return jsonify({"success": False, "error": "Cannot read requested frame"}), 500
+
+        ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+        if not ok:
+            return jsonify({"success": False, "error": "Cannot encode requested frame"}), 500
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or record.fps or 25
+        person_count = person_counts[frame_index] if frame_index < len(person_counts) else record.total_persons or 0
+        response = Response(buffer.tobytes(), mimetype="image/jpeg")
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Person-Count"] = str(person_count)
+        response.headers["X-Frame-Index"] = str(frame_index)
+        response.headers["X-Frame-Total"] = str(total_frames)
+        response.headers["X-Fps"] = str(fps)
+        return response
+    finally:
+        cap.release()
 
 
 @app.route("/api/video/stream/<int:video_id>")
@@ -583,6 +642,9 @@ def delete_video_record(video_id):
             result_path = Path(record.processed_video_path)
             if result_path.exists():
                 result_path.unlink()
+            metadata_path = get_video_count_metadata_path(result_path)
+            if metadata_path.exists():
+                metadata_path.unlink()
         db.session.delete(record)
         db.session.commit()
         return jsonify({"success": True, "message": "Video record deleted"})

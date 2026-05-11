@@ -29,25 +29,41 @@
                     <span class="api-status">&#26412;&#22320; YOLO</span>
                 </div>
                 <form id="videoForm">
-                    <label class="dropzone" id="videoDropzone" for="videoInput">
+                    <label class="dropzone video-dropzone" id="videoDropzone" for="videoInput">
                         <span class="dropzone-main">
                             <span class="upload-mark">+</span>
                             <strong>&#25302;&#25341;&#35270;&#39057;&#21040;&#36825;&#37324;</strong>
                             <span>&#20063;&#21487;&#20197;&#28857;&#20987;&#36873;&#25321;&#25991;&#20214;&#12290;</span>
                         </span>
+                        <span class="upload-video-preview" id="uploadVideoPreview" hidden>
+                            <video id="uploadPreviewVideo" controls preload="metadata"></video>
+                            <span class="upload-preview-caption" id="uploadPreviewCaption"></span>
+                        </span>
                         <input id="videoInput" type="file" name="video" accept=".mp4,.avi,.mov,.mkv,.webm,.flv" required>
                     </label>
-                    <div class="file-row">
-                        <div class="file-name" id="videoFileName">&#36824;&#27809;&#26377;&#36873;&#25321;&#35270;&#39057;</div>
-                        <button type="submit" id="videoSubmitButton">&#24320;&#22987;&#22788;&#29702;</button>
+                    <div class="file-row video-file-row">
+                        <div class="selected-file">
+                            <div class="file-name" id="videoFileName">&#36824;&#27809;&#26377;&#36873;&#25321;&#35270;&#39057;</div>
+                            <div class="file-meta" id="videoFileMeta">&#26368;&#22823; 500MB</div>
+                        </div>
+                        <button type="submit" id="videoSubmitButton" disabled>&#24320;&#22987;&#22788;&#29702;</button>
                     </div>
                 </form>
             </div>
 
             <aside class="surface progress-panel">
                 <h2 class="surface-title">&#22788;&#29702;&#36827;&#24230;</h2>
-                <div class="progress-bar"><span id="progressFill"></span></div>
+                <div class="progress-row">
+                    <div class="progress-bar"><span id="progressFill"></span></div>
+                    <strong class="progress-percent" id="progressPercent">0%</strong>
+                </div>
                 <p id="progressText">&#31561;&#24453;&#19978;&#20256;&#35270;&#39057;</p>
+                <div class="video-stats" id="videoStats" hidden>
+                    <div class="video-stat video-stat-primary">
+                        <span>&#24403;&#21069;&#30011;&#38754;&#20154;&#25968;</span>
+                        <strong id="currentPersons">0</strong>
+                    </div>
+                </div>
                 <div class="video-result" id="videoResult"></div>
             </aside>
         </section>

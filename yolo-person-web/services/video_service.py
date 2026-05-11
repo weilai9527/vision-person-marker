@@ -1,3 +1,4 @@
+import json
 import threading
 from pathlib import Path
 from uuid import uuid4
@@ -36,7 +37,43 @@ def update_video_progress(video_id: int, **updates) -> None:
 
 def get_video_progress(video_id: int) -> dict:
     with _progress_lock:
-        return dict(_progress.get(video_id, {"status": "unknown", "progress": 0, "current_frame": 0, "total_frames": 0, "message": ""}))
+        return dict(_progress.get(video_id, {
+            "status": "unknown",
+            "progress": 0,
+            "current_frame": 0,
+            "total_frames": 0,
+            "current_person_count": 0,
+            "total_persons": 0,
+            "message": "",
+        }))
+
+
+def get_video_count_metadata_path(video_path: Path) -> Path:
+    return video_path.with_suffix(".counts.json")
+
+
+def save_video_count_metadata(video_path: Path, fps: float, person_counts: list[int]) -> None:
+    get_video_count_metadata_path(video_path).write_text(
+        json.dumps({"fps": fps, "person_counts": person_counts}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def load_video_count_metadata(video_path: Path) -> dict:
+    metadata_path = get_video_count_metadata_path(video_path)
+    if not metadata_path.exists():
+        return {"fps": 0, "person_counts": []}
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"fps": 0, "person_counts": []}
+    person_counts = metadata.get("person_counts")
+    if not isinstance(person_counts, list):
+        person_counts = []
+    return {
+        "fps": float(metadata.get("fps") or 0),
+        "person_counts": [int(count or 0) for count in person_counts],
+    }
 
 
 def _require_cv2():
@@ -113,6 +150,7 @@ def process_video_detection(video_id: int) -> None:
     total_persons = 0
     confidence_sum = 0.0
     confidence_count = 0
+    frame_person_counts = []
 
     try:
         source_fps = float(cap.get(cv2.CAP_PROP_FPS) or record.fps or 25)
@@ -150,10 +188,12 @@ def process_video_detection(video_id: int) -> None:
             results = model.track(persist=True, **predict_kwargs) if VIDEO_USE_TRACKER else model.predict(**predict_kwargs)
             for frame, result in zip(frames, results):
                 detections = _extract_detections(result)
+                current_person_count = len(detections)
+                frame_person_counts.append(current_person_count)
                 _draw_detections(frame, detections, cv2)
                 writer.write(frame)
                 processed += 1
-                total_persons += len(detections)
+                total_persons = max(total_persons, current_person_count)
                 for det in detections:
                     confidence_sum += det["conf"]
                     confidence_count += 1
@@ -168,6 +208,8 @@ def process_video_detection(video_id: int) -> None:
                         progress=min(progress, 99),
                         current_frame=processed,
                         total_frames=record.total_frames or 0,
+                        current_person_count=current_person_count,
+                        total_persons=total_persons,
                         message=f"已处理 {processed}/{record.total_frames or '?'} 帧",
                     )
 
@@ -177,6 +219,7 @@ def process_video_detection(video_id: int) -> None:
         record.processed_frames = processed
         record.total_persons = total_persons
         record.avg_confidence = avg_confidence
+        save_video_count_metadata(output_path, fps, frame_person_counts)
         db.session.commit()
         update_video_progress(video_id, status="completed", progress=100, current_frame=processed, total_frames=record.total_frames or processed, message="处理完成")
     except Exception as exc:
