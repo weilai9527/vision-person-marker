@@ -12,6 +12,7 @@
     const toast = document.getElementById("cameraToast");
     const overlay = document.getElementById("cameraOverlay");
     const monitorButton = document.getElementById("monitorCameraButton");
+    const targetToggleButton = document.getElementById("targetToggleButton");
     const recordButton = document.getElementById("recordCameraButton");
     const personCountText = document.getElementById("cameraPersonCount");
     const detectMeta = document.getElementById("cameraDetectMeta");
@@ -64,6 +65,20 @@
     function updateMonitorButton() {
         monitorButton.disabled = !stream;
         monitorButton.textContent = monitoring ? "暂停检测" : "实时检测";
+    }
+
+    function updateTargetToggleButton() {
+        targetToggleButton.disabled = !stream;
+        targetToggleButton.textContent = detectionTarget === "person" ? "切换车辆" : "切换人员";
+        document.getElementById("cameraCountLabel").textContent = detectionTarget === "person" ? "当前人数" : "当前车辆数";
+        document.getElementById("cameraFeedChip").textContent = detectionTarget === "person" ? "人员检测" : "车辆检测";
+    }
+
+    function toggleTarget() {
+        detectionTarget = detectionTarget === "person" ? "vehicle" : "person";
+        updateTargetToggleButton();
+        clearDetections();
+        detectMeta.textContent = `已切换为${detectionTarget === "person" ? "人员" : "车辆"}检测`;
     }
 
     function formatDuration(totalSeconds) {
@@ -123,13 +138,15 @@
         const rect = resizeOverlay();
         overlayContext.clearRect(0, 0, rect.width, rect.height);
 
-        if (!detection || !detection.width || !detection.height) {
+        if (!detection || !detection.boxes || !detection.boxes.length) {
             return;
         }
 
-        const scale = Math.min(rect.width / detection.width, rect.height / detection.height);
-        const drawWidth = detection.width * scale;
-        const drawHeight = detection.height * scale;
+        const refWidth = detectVideo.videoWidth || detection.width;
+        const refHeight = detectVideo.videoHeight || detection.height;
+        const scale = Math.min(rect.width / refWidth, rect.height / refHeight);
+        const drawWidth = refWidth * scale;
+        const drawHeight = refHeight * scale;
         const offsetX = (rect.width - drawWidth) / 2;
         const offsetY = (rect.height - drawHeight) / 2;
 
@@ -138,10 +155,15 @@
         overlayContext.textBaseline = "top";
 
         detection.boxes.forEach((box, index) => {
-            const x = offsetX + box.x1 * scale;
-            const y = offsetY + box.y1 * scale;
-            const width = (box.x2 - box.x1) * scale;
-            const height = (box.y2 - box.y1) * scale;
+            const boxX1 = box.x1 * (refWidth / detection.width);
+            const boxY1 = box.y1 * (refHeight / detection.height);
+            const boxX2 = box.x2 * (refWidth / detection.width);
+            const boxY2 = box.y2 * (refHeight / detection.height);
+
+            const x = offsetX + boxX1 * scale;
+            const y = offsetY + boxY1 * scale;
+            const width = (boxX2 - boxX1) * scale;
+            const height = (boxY2 - boxY1) * scale;
             const label = `${index + 1}`;
             const labelWidth = overlayContext.measureText(label).width + 12;
 
@@ -172,7 +194,7 @@
         captureContext.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
 
         return new Promise((resolve) => {
-            captureCanvas.toBlob(resolve, "image/jpeg", 0.74);
+            captureCanvas.toBlob(resolve, "image/jpeg", 0.85);
         });
     }
 
@@ -188,6 +210,8 @@
             detectMeta.textContent = "未开始实时检测";
         }
     }
+
+    let detectionTarget = "person";
 
     async function detectFrame() {
         if (!monitoring || detecting || !stream) {
@@ -206,6 +230,7 @@
 
             const formData = new FormData();
             formData.append("frame", blob, "camera-frame.jpg");
+            formData.append("target", detectionTarget);
 
             const response = await fetch("/api/camera/detect", {
                 method: "POST",
@@ -219,7 +244,8 @@
             }
 
             lastDetection = data;
-            personCountText.textContent = String(data.person_count || 0);
+            const count = data.count !== undefined ? data.count : (data.person_count || 0);
+            personCountText.textContent = String(count);
             detectMeta.textContent = `YOLO 实时检测，耗时 ${data.elapsed_ms || 0} ms`;
             drawDetections(data);
         } catch (error) {
@@ -227,7 +253,7 @@
         } finally {
             detecting = false;
             if (monitoring && stream) {
-                detectTimer = window.setTimeout(detectFrame, 900);
+                detectTimer = window.setTimeout(detectFrame, 200);
             }
         }
     }
@@ -412,6 +438,7 @@
             startButton.disabled = true;
             stopButton.disabled = false;
             monitorButton.disabled = false;
+            targetToggleButton.disabled = false;
             recordButton.disabled = !window.MediaRecorder;
             cameraSelect.disabled = true;
             hint.textContent = "摄像头正在实时检测中。";
@@ -496,6 +523,7 @@
 
     startButton.addEventListener("click", startCamera);
     monitorButton.addEventListener("click", toggleMonitoring);
+    targetToggleButton.addEventListener("click", toggleTarget);
     recordButton.addEventListener("click", toggleRecording);
     stopButton.addEventListener("click", stopCamera);
     window.addEventListener("beforeunload", () => {

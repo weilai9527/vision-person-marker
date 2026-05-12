@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -154,6 +155,67 @@ def get_video_info(video_path: Path) -> dict:
         cap.release()
 
 
+def _iou(box_a: tuple, box_b: tuple) -> float:
+    x1, y1, x2, y2 = box_a
+    x1b, y1b, x2b, y2b = box_b
+    xi1 = max(x1, x1b)
+    yi1 = max(y1, y1b)
+    xi2 = min(x2, x2b)
+    yi2 = min(y2, y2b)
+    inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
+    union = (x2 - x1) * (y2 - y1) + (x2b - x1b) * (y2b - y1b) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _smooth_detections(
+    raw_detections: list[dict],
+    smooth_tracks: list[dict],
+    iou_threshold: float = 0.5,
+    max_miss: int = 2,
+) -> tuple[list[dict], list[dict]]:
+    matched_track = set()
+    matched_det = set()
+    for di, det in enumerate(raw_detections):
+        best_iou = 0.0
+        best_ti = -1
+        for ti, track in enumerate(smooth_tracks):
+            if ti in matched_track:
+                continue
+            val = _iou(det["box"], track["box"])
+            if val > best_iou:
+                best_iou = val
+                best_ti = ti
+        if best_iou >= iou_threshold:
+            matched_track.add(best_ti)
+            matched_det.add(di)
+            smooth_tracks[best_ti]["box"] = det["box"]
+            smooth_tracks[best_ti]["conf"] = det["conf"]
+            smooth_tracks[best_ti]["class_id"] = det.get("class_id")
+            smooth_tracks[best_ti]["class_name"] = det.get("class_name", "person")
+            smooth_tracks[best_ti]["missed"] = 0
+
+    for ti, track in enumerate(smooth_tracks):
+        if ti not in matched_track:
+            track["missed"] += 1
+
+    for di, det in enumerate(raw_detections):
+        if di not in matched_det:
+            smooth_tracks.append({**det, "missed": 0})
+
+    active_tracks = [t for t in smooth_tracks if t["missed"] <= max_miss]
+
+    drawn_detections = [
+        {
+            "box": t["box"],
+            "conf": t["conf"],
+            "class_id": t.get("class_id"),
+            "class_name": t.get("class_name", "person"),
+        }
+        for t in active_tracks
+    ]
+    return drawn_detections, active_tracks
+
+
 def _extract_detections(result) -> list[dict]:
     detections = []
     if result.boxes is None:
@@ -228,6 +290,11 @@ def process_video_detection(video_id: int) -> None:
     confidence_sum = 0.0
     confidence_count = 0
     frame_person_counts = []
+    last_db_update = time.time()
+    DB_UPDATE_INTERVAL = 1.0  # 最小数据库写入间隔（秒）
+    smooth_tracks = []
+    SMOOTH_MAX_MISS = 2
+    SMOOTH_IOU_THRESHOLD = 0.5
 
     try:
         source_fps = float(cap.get(cv2.CAP_PROP_FPS) or record.fps or 25)
@@ -239,9 +306,11 @@ def process_video_detection(video_id: int) -> None:
         if not writer.isOpened():
             raise ValueError("Cannot create output video file")
 
+        batch_size = 1 if VIDEO_USE_TRACKER else max(1, VIDEO_BATCH_SIZE)
+
         while True:
             frames = []
-            for _ in range(max(1, VIDEO_BATCH_SIZE)):
+            for _ in range(batch_size):
                 ok, frame = cap.read()
                 if not ok:
                     break
@@ -264,34 +333,43 @@ def process_video_detection(video_id: int) -> None:
 
             results = model.track(persist=True, **predict_kwargs) if VIDEO_USE_TRACKER else model.predict(**predict_kwargs)
             for frame, result in zip(frames, results):
-                detections = _extract_detections(result)
-                current_person_count = len(detections)
+                raw_detections = _extract_detections(result)
+                drawn_detections, smooth_tracks = _smooth_detections(
+                    raw_detections,
+                    smooth_tracks,
+                    SMOOTH_IOU_THRESHOLD,
+                    SMOOTH_MAX_MISS,
+                )
+                current_person_count = len(drawn_detections)
                 frame_person_counts.append(current_person_count)
-                _draw_detections(frame, detections, cv2, target_options["box_color"])
+                _draw_detections(frame, drawn_detections, cv2, target_options["box_color"])
                 writer.write(frame)
                 processed += 1
                 total_persons = max(total_persons, current_person_count)
-                for det in detections:
+                for det in raw_detections:
                     confidence_sum += det["conf"]
                     confidence_count += 1
 
                 if processed % max(1, VIDEO_PROGRESS_INTERVAL) == 0:
-                    progress = int(processed / record.total_frames * 100) if record.total_frames else 0
-                    record.processed_frames = processed
-                    db.session.commit()
-                    update_video_progress(
-                        video_id,
-                        status="processing",
-                        progress=min(progress, 99),
-                        current_frame=processed,
-                        total_frames=record.total_frames or 0,
-                        current_person_count=current_person_count,
-                        current_count=current_person_count,
-                        total_persons=total_persons,
-                        total_count=total_persons,
-                        detection_target=detection_target,
-                        message=f"Processed {processed}/{record.total_frames or '?'} frames",
-                    )
+                    now = time.time()
+                    if now - last_db_update >= DB_UPDATE_INTERVAL:
+                        last_db_update = now
+                        progress = int(processed / record.total_frames * 100) if record.total_frames else 0
+                        record.processed_frames = processed
+                        db.session.commit()
+                        update_video_progress(
+                            video_id,
+                            status="processing",
+                            progress=min(progress, 99),
+                            current_frame=processed,
+                            total_frames=record.total_frames or 0,
+                            current_person_count=current_person_count,
+                            current_count=current_person_count,
+                            total_persons=total_persons,
+                            total_count=total_persons,
+                            detection_target=detection_target,
+                            message=f"Processed {processed}/{record.total_frames or '?'} frames",
+                        )
 
         avg_confidence = confidence_sum / confidence_count if confidence_count else 0.0
         record.status = "completed"

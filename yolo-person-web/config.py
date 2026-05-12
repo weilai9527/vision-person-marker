@@ -13,10 +13,10 @@ LLM_API_URL = os.environ.get("LLM_API_URL", "https://api.openai.com/v1/chat/comp
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "180"))
-MODEL_IMAGE_MAX_SIDE = int(os.environ.get("MODEL_IMAGE_MAX_SIDE", "1280"))
-MODEL_IMAGE_JPEG_QUALITY = int(os.environ.get("MODEL_IMAGE_JPEG_QUALITY", "72"))
+MODEL_IMAGE_MAX_SIDE = int(os.environ.get("MODEL_IMAGE_MAX_SIDE", "1600"))
+MODEL_IMAGE_JPEG_QUALITY = int(os.environ.get("MODEL_IMAGE_JPEG_QUALITY", "85"))
 MODEL_IMAGE_MIN_SIDE = int(os.environ.get("MODEL_IMAGE_MIN_SIDE", "720"))
-MODEL_IMAGE_MAX_PIXELS = int(os.environ.get("MODEL_IMAGE_MAX_PIXELS", "900000"))
+MODEL_IMAGE_MAX_PIXELS = int(os.environ.get("MODEL_IMAGE_MAX_PIXELS", "1500000"))
 BOX_EXPAND_X = float(os.environ.get("BOX_EXPAND_X", "0"))
 BOX_EXPAND_Y = float(os.environ.get("BOX_EXPAND_Y", "0"))
 ENABLE_TILE_DETECTION = os.environ.get("ENABLE_TILE_DETECTION", "0") == "1"

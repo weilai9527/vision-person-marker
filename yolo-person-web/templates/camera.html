@@ -16,7 +16,8 @@
             <nav class="header-actions">
                 <a href="{{ url_for('index') }}" class="button-secondary">图片检测</a>
                 <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
-                <a href="{{ url_for('vehicle_page') }}" class="button-secondary">车辆检测</a>
+                <a href="{{ url_for('vehicle_page') }}" class="button-secondary">车辆视频</a>
+                <a href="/vehicle-image" class="button-secondary">车辆图片</a>
                 <a href="{{ url_for('history') }}" class="button-secondary">历史记录</a>
             </nav>
         </header>
@@ -30,7 +31,7 @@
                                 <span class="camera-feed-title">原始画面</span>
                                 <span class="camera-feed-subtitle">Camera Input</span>
                             </div>
-                            <span class="camera-feed-chip">无标注</span>
+                            <span class="camera-feed-chip" id="cameraFeedChip">无标注</span>
                         </div>
                         <div class="camera-view">
                             <video id="cameraVideo" autoplay playsinline muted></video>
@@ -79,6 +80,7 @@
                     <div class="camera-buttons">
                         <button type="button" id="startCameraButton">开始</button>
                         <button type="button" class="button-secondary" id="monitorCameraButton" disabled>实时检测</button>
+                        <button type="button" class="button-secondary" id="targetToggleButton" disabled>切换车辆</button>
                         <button type="button" class="button-secondary" id="recordCameraButton" disabled>开始录像</button>
                         <button type="button" class="button-danger" id="stopCameraButton" disabled>停止</button>
                     </div>
@@ -96,7 +98,7 @@
                 </div>
                 <div class="camera-live-stats">
                     <div class="camera-live-count">
-                        <span>当前人数</span>
+                        <span id="cameraCountLabel">当前人数</span>
                         <strong id="cameraPersonCount">0</strong>
                     </div>
                     <div class="camera-live-meta" id="cameraDetectMeta">未开始实时检测</div>

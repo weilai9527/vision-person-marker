@@ -16,8 +16,13 @@
             <nav class="header-actions">
                 <a href="{{ url_for('index') }}" class="button-secondary">图片检测</a>
                 <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
-                <a href="{{ url_for('vehicle_page') }}" class="button-secondary">&#36710;&#36742;&#26816;&#27979;</a>
+                <a href="{{ url_for('vehicle_page') }}" class="button-secondary">车辆视频</a>
+                <a href="/vehicle-image" class="button-secondary">车辆图片</a>
                 <a href="{{ url_for('camera_page') }}" class="button-secondary">摄像头</a>
+                <a href="/api/history/export" class="button-secondary">导出图片检测</a>
+                <a href="/api/vehicle/image/export" class="button-secondary">导出车辆图片</a>
+                <a href="/api/video/export" class="button-secondary">导出视频检测</a>
+                <a href="/api/vehicle/video/export" class="button-secondary">导出车辆视频</a>
             </nav>
         </header>
 

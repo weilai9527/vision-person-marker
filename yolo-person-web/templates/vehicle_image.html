@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YOLO 人数检测</title>
+    <title>YOLO 车辆检测</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
 </head>
 <body>
     <main class="app-shell">
         <header class="app-header">
             <div class="brand">
-                <p class="eyebrow">Local YOLO Person Detection</p>
-                <h1>YOLO 人数检测</h1>
+                <p class="eyebrow">Local YOLO Vehicle Detection</p>
+                <h1>YOLO 车辆检测</h1>
             </div>
             <nav class="header-actions">
+                <a href="{{ url_for('index') }}" class="button-secondary">图片检测</a>
                 <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
                 <a href="{{ url_for('vehicle_page') }}" class="button-secondary">车辆视频</a>
-                <a href="/vehicle-image" class="button-secondary">车辆图片</a>
                 <a href="{{ url_for('camera_page') }}" class="button-secondary">摄像头</a>
                 <a href="{{ url_for('history') }}" class="button-secondary">历史记录</a>
                 <button class="button-secondary" type="button" id="openApiButton">添加 API</button>
@@ -28,7 +28,7 @@
                 <div class="surface-header">
                     <div>
                         <h2 class="surface-title">上传图片</h2>
-                        <p>选择或拖拽一张图片。配置 API 后会先用 YOLO 快速预判，复杂图自动转大模型。</p>
+                        <p>选择或拖拽一张图片，系统会使用本地 YOLO 检测车辆并标注。</p>
                     </div>
                     <span class="api-status">{% if has_api_key %}智能分流{% else %}本地 YOLO{% endif %}</span>
                 </div>
@@ -75,11 +75,11 @@
         <div class="message">{{ success }}</div>
         {% endif %}
 
-        {% if person_count is not none %}
+        {% if vehicle_count is not none %}
         <section class="result">
             <div class="surface result-summary">
-                <div class="count-label">检测人数</div>
-                <div class="count">{{ person_count }}</div>
+                <div class="count-label">检测车辆数</div>
+                <div class="count">{{ vehicle_count }}</div>
                 <div class="result-meta">
                     {% if original_filename %}
                     <p>图片文件：{{ original_filename }}</p>
@@ -91,8 +91,6 @@
             </div>
         </section>
         {% endif %}
-    </main>
-
     <div class="api-modal" id="apiModal" aria-hidden="true">
         <section class="api-panel" role="dialog" aria-modal="true" aria-labelledby="apiTitle">
             <header>

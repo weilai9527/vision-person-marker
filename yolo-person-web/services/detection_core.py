@@ -93,8 +93,6 @@ def infer_box_coordinate_size(boxes: list, default_width: int, default_height: i
     max_value = max(max_x, max_y)
     if max_value <= 1.0:
         return 1, 1
-    if max_value <= 1000 and (default_width > 1200 or default_height > 1200):
-        return 1000, 1000
     return default_width, default_height
 
 

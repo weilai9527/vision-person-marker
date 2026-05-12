@@ -3,8 +3,12 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment
 
 from flask import Flask, render_template, request, url_for, Response, jsonify, stream_with_context, send_file
 from PIL import Image
@@ -28,10 +32,10 @@ from config import (
     VIDEO_MAX_SIZE,
     API_PROVIDERS,
 )
-from models import db, ImageRecord, VideoRecord
+from models import db, DetectionResult, ImageRecord, VideoRecord
 from services.image_service import draw_person_boxes, draw_vehicle_boxes
-from services.llm_service import call_yolo_judge_model
-from services.yolo_service import VEHICLE_CLASS_IDS, call_local_yolo, is_complex_person_scene, run_yolo_detection, run_yolo_detection_on_image
+from services.llm_service import call_vehicle_vision_model, call_vehicle_yolo_judge_model, call_yolo_judge_model
+from services.yolo_service import DEFAULT_PERSON_CLASS_IDS, VEHICLE_CLASS_IDS, call_local_yolo, is_complex_person_scene, run_yolo_detection, run_yolo_detection_on_image
 from services.video_service import (
     process_video_detection,
     get_video_progress,
@@ -274,7 +278,7 @@ def index():
                         person_count, analysis, result_name, model_width, model_height = call_local_yolo(
                             upload_path, image_record.id, {"provider": "local_yolo"}, draw_person_boxes
                         )
-                    image_record.model_image_path = str(upload_path)
+                    image_record.model_image_path = f"static/results/{result_name}"
                     image_record.model_width = model_width
                     image_record.model_height = model_height
                     db.session.commit()
@@ -320,14 +324,20 @@ def camera_detect():
     if frame is None or frame.filename == "":
         return jsonify({"success": False, "error": "No camera frame provided"}), 400
 
+    target = request.form.get("target", "person")
+    class_ids = VEHICLE_CLASS_IDS if target == "vehicle" else DEFAULT_PERSON_CLASS_IDS
+    count_label = "\u8f66\u8f86" if target == "vehicle" else "\u4eba"
+
     started_at = time.perf_counter()
     try:
         with Image.open(frame.stream) as image:
             boxes, width, height = run_yolo_detection_on_image(
                 image,
+                class_ids=class_ids,
+                target_label=target,
                 conf=0.22,
                 iou=0.50,
-                imgsz=640,
+                imgsz=960,
                 min_area=35,
             )
     except Exception as exc:
@@ -338,11 +348,260 @@ def camera_detect():
     return jsonify({
         "success": True,
         "person_count": len(boxes),
+        "count": len(boxes),
+        "detection_target": target,
         "boxes": boxes,
         "width": width,
         "height": height,
         "elapsed_ms": elapsed_ms,
     })
+
+
+@app.route("/api/history/export")
+def export_history():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "\u56fe\u7247\u68c0\u6d4b\u5386\u53f2"
+
+    headers = [
+        "\u8bb0\u5f55ID", "\u539f\u59cb\u6587\u4ef6\u540d", "\u4e0a\u4f20\u65f6\u95f4",
+        "\u539f\u59cb\u5c3a\u5bf8", "\u6a21\u578b\u5c3a\u5bf8", "\u68c0\u6d4bID",
+        "\u68c0\u6d4b\u65f6\u95f4", "\u68c0\u6d4b\u4eba\u6570", "\u6a21\u578b\u8bf4\u660e",
+        "API\u63d0\u4f9b\u5546", "\u6a21\u578b\u540d\u79f0",
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    records = ImageRecord.query.order_by(ImageRecord.uploaded_at.desc()).all()
+    for record in records:
+        base = [
+            record.id,
+            record.original_filename,
+            record.uploaded_at.strftime("%Y-%m-%d %H:%M:%S") if record.uploaded_at else "",
+            f"{record.original_width or '-'}x{record.original_height or '-'}",
+            f"{record.model_width or '-'}x{record.model_height or '-'}",
+        ]
+        if record.detections:
+            for detection in record.detections:
+                ws.append(base + [
+                    detection.id,
+                    detection.detected_at.strftime("%Y-%m-%d %H:%M:%S") if detection.detected_at else "",
+                    detection.person_count,
+                    detection.llm_analysis_text or "",
+                    detection.llm_api_provider or "",
+                    detection.llm_model_name or "",
+                ])
+        else:
+            ws.append(base + ["", "", "", "", "", ""])
+
+    ws.column_dimensions["A"].width = 8
+    ws.column_dimensions["B"].width = 32
+    ws.column_dimensions["C"].width = 20
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 14
+    ws.column_dimensions["F"].width = 8
+    ws.column_dimensions["G"].width = 20
+    ws.column_dimensions["H"].width = 12
+    ws.column_dimensions["I"].width = 60
+    ws.column_dimensions["J"].width = 18
+    ws.column_dimensions["K"].width = 18
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"\u56fe\u7247\u68c0\u6d4b\u5386\u53f2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/api/video/export")
+def export_video_history():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "\u89c6\u9891\u68c0\u6d4b\u5386\u53f2"
+
+    headers = [
+        "\u8bb0\u5f55ID", "\u539f\u59cb\u6587\u4ef6\u540d", "\u4e0a\u4f20\u65f6\u95f4",
+        "\u68c0\u6d4b\u76ee\u6807", "\u72b6\u6001", "\u603b\u5e27\u6570", "\u5904\u7406\u5e27\u6570",
+        "\u89c6\u9891\u5c3a\u5bf8", "FPS", "\u65f6\u957f(\u79d2)", "\u6700\u5927\u4eba\u6570/\u8f66\u8f86\u6570",
+        "\u5e73\u5747\u7f6e\u4fe1\u5ea6", "\u9519\u8bef\u4fe1\u606f",
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    records = VideoRecord.query.order_by(VideoRecord.uploaded_at.desc()).all()
+    for record in records:
+        ws.append([
+            record.id,
+            record.original_filename,
+            record.uploaded_at.strftime("%Y-%m-%d %H:%M:%S") if record.uploaded_at else "",
+            record.detection_target or "person",
+            record.status or "",
+            record.total_frames,
+            record.processed_frames,
+            f"{record.video_width or '-'}x{record.video_height or '-'}",
+            round(record.fps, 2) if record.fps else "",
+            round(record.duration, 2) if record.duration else "",
+            record.total_persons,
+            round(record.avg_confidence, 4) if record.avg_confidence else "",
+            record.error_message or "",
+        ])
+
+    ws.column_dimensions["A"].width = 8
+    ws.column_dimensions["B"].width = 32
+    ws.column_dimensions["C"].width = 20
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["E"].width = 10
+    ws.column_dimensions["F"].width = 10
+    ws.column_dimensions["G"].width = 10
+    ws.column_dimensions["H"].width = 14
+    ws.column_dimensions["I"].width = 8
+    ws.column_dimensions["J"].width = 12
+    ws.column_dimensions["K"].width = 18
+    ws.column_dimensions["L"].width = 14
+    ws.column_dimensions["M"].width = 40
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"\u89c6\u9891\u68c0\u6d4b\u5386\u53f2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/api/vehicle/video/export")
+def export_vehicle_video_history():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "\u8f66\u8f86\u89c6\u9891\u68c0\u6d4b\u5386\u53f2"
+
+    headers = [
+        "\u8bb0\u5f55ID", "\u539f\u59cb\u6587\u4ef6\u540d", "\u4e0a\u4f20\u65f6\u95f4",
+        "\u68c0\u6d4b\u76ee\u6807", "\u72b6\u6001", "\u603b\u5e27\u6570", "\u5904\u7406\u5e27\u6570",
+        "\u89c6\u9891\u5c3a\u5bf8", "FPS", "\u65f6\u957f(\u79d2)", "\u6700\u5927\u8f66\u8f86\u6570",
+        "\u5e73\u5747\u7f6e\u4fe1\u5ea6", "\u9519\u8bef\u4fe1\u606f",
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    records = VideoRecord.query.filter_by(detection_target="vehicle").order_by(VideoRecord.uploaded_at.desc()).all()
+    for record in records:
+        ws.append([
+            record.id,
+            record.original_filename,
+            record.uploaded_at.strftime("%Y-%m-%d %H:%M:%S") if record.uploaded_at else "",
+            record.detection_target or "vehicle",
+            record.status or "",
+            record.total_frames,
+            record.processed_frames,
+            f"{record.video_width or '-'}x{record.video_height or '-'}",
+            round(record.fps, 2) if record.fps else "",
+            round(record.duration, 2) if record.duration else "",
+            record.total_persons,
+            round(record.avg_confidence, 4) if record.avg_confidence else "",
+            record.error_message or "",
+        ])
+
+    ws.column_dimensions["A"].width = 8
+    ws.column_dimensions["B"].width = 32
+    ws.column_dimensions["C"].width = 20
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["E"].width = 10
+    ws.column_dimensions["F"].width = 10
+    ws.column_dimensions["G"].width = 10
+    ws.column_dimensions["H"].width = 14
+    ws.column_dimensions["I"].width = 8
+    ws.column_dimensions["J"].width = 12
+    ws.column_dimensions["K"].width = 18
+    ws.column_dimensions["L"].width = 14
+    ws.column_dimensions["M"].width = 40
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"\u8f66\u8f86\u89c6\u9891\u68c0\u6d4b\u5386\u53f2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/api/vehicle/image/export")
+def export_vehicle_image_history():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "\u8f66\u8f86\u56fe\u7247\u68c0\u6d4b\u5386\u53f2"
+
+    headers = [
+        "\u8bb0\u5f55ID", "\u539f\u59cb\u6587\u4ef6\u540d", "\u4e0a\u4f20\u65f6\u95f4",
+        "\u539f\u59cb\u5c3a\u5bf8", "\u6a21\u578b\u5c3a\u5bf8", "\u68c0\u6d4bID",
+        "\u68c0\u6d4b\u65f6\u95f4", "\u68c0\u6d4b\u8f66\u8f86\u6570", "\u6a21\u578b\u8bf4\u660e",
+        "API\u63d0\u4f9b\u5546", "\u6a21\u578b\u540d\u79f0",
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    records = ImageRecord.query.join(DetectionResult).filter(
+        DetectionResult.llm_api_provider == "local_yolo_vehicle"
+    ).order_by(ImageRecord.uploaded_at.desc()).all()
+    for record in records:
+        base = [
+            record.id,
+            record.original_filename,
+            record.uploaded_at.strftime("%Y-%m-%d %H:%M:%S") if record.uploaded_at else "",
+            f"{record.original_width or '-'}x{record.original_height or '-'}",
+            f"{record.model_width or '-'}x{record.model_height or '-'}",
+        ]
+        vehicle_detections = [d for d in record.detections if d.llm_api_provider == "local_yolo_vehicle"]
+        if vehicle_detections:
+            for detection in vehicle_detections:
+                ws.append(base + [
+                    detection.id,
+                    detection.detected_at.strftime("%Y-%m-%d %H:%M:%S") if detection.detected_at else "",
+                    detection.person_count,
+                    detection.llm_analysis_text or "",
+                    detection.llm_api_provider or "",
+                    detection.llm_model_name or "",
+                ])
+        else:
+            ws.append(base + ["", "", "", "", "", ""])
+
+    ws.column_dimensions["A"].width = 8
+    ws.column_dimensions["B"].width = 32
+    ws.column_dimensions["C"].width = 20
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 14
+    ws.column_dimensions["F"].width = 8
+    ws.column_dimensions["G"].width = 20
+    ws.column_dimensions["H"].width = 14
+    ws.column_dimensions["I"].width = 60
+    ws.column_dimensions["J"].width = 18
+    ws.column_dimensions["K"].width = 18
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"\u8f66\u8f86\u56fe\u7247\u68c0\u6d4b\u5386\u53f2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.route("/vehicle", methods=["GET", "POST"])
@@ -388,7 +647,7 @@ def vehicle_page():
                     target_label="vehicle",
                     count_label="\u8f66\u8f86",
                 )
-                image_record.model_image_path = str(upload_path)
+                image_record.model_image_path = f"static/results/{result_name}"
                 image_record.model_width = model_width
                 image_record.model_height = model_height
                 db.session.commit()
@@ -401,6 +660,142 @@ def vehicle_page():
     return render_template(
         "vehicle.html",
         error=error,
+        vehicle_count=vehicle_count,
+        analysis=analysis,
+        result_image_url=result_image_url,
+        original_filename=original_filename,
+    )
+
+
+@app.route("/vehicle-image", methods=["GET", "POST"])
+def vehicle_image_page():
+    error = None
+    success = None
+    vehicle_count = None
+    analysis = None
+    result_image_url = None
+    original_filename = None
+    api_config = load_api_config_for_display()
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "save_api":
+            provider = request.form.get("provider", "custom")
+            api_url = request.form.get("api_url", "")
+            api_key = request.form.get("api_key", "")
+            model = request.form.get("model", "")
+            current_api_config = load_api_config()
+            submitted_api_key = api_key.strip()
+            if (not submitted_api_key or is_masked_api_key(submitted_api_key)) and not current_api_config.get("api_key"):
+                error = "\u8bf7\u586b\u5199\u5b8c\u6574 API Key\uff0c\u4e0d\u80fd\u4f7f\u7528\u5df2\u63a9\u7801\u7684 Key\u3002"
+            else:
+                save_api_config(provider, api_url, api_key, model)
+                api_config = load_api_config_for_display()
+                success = "API \u914d\u7f6e\u5df2\u4fdd\u5b58\u3002"
+        else:
+            file = request.files.get("image")
+            if file is None or file.filename == "":
+                error = "\u8bf7\u5148\u9009\u62e9\u4e00\u5f20\u56fe\u7247\u3002"
+            elif not allowed_file(file.filename):
+                error = "\u53ea\u652f\u6301 jpg\u3001jpeg\u3001png\u3001bmp\u3001webp \u683c\u5f0f\u3002"
+            else:
+                original_filename = file.filename
+                suffix = Path(original_filename).suffix.lower()
+                upload_name = f"{uuid4().hex}{suffix}"
+                upload_path = UPLOAD_DIR / upload_name
+                file.save(upload_path)
+
+                with Image.open(upload_path) as img:
+                    original_width, original_height = img.size
+
+                image_record = ImageRecord(
+                    original_filename=original_filename,
+                    original_image_path=str(upload_path),
+                    original_width=original_width,
+                    original_height=original_height,
+                )
+                db.session.add(image_record)
+                db.session.commit()
+
+                try:
+                    detection_config = load_api_config()
+                    if detection_config.get("api_key"):
+                        preflight_boxes, preflight_width, preflight_height = run_yolo_detection(
+                            upload_path,
+                            class_ids=VEHICLE_CLASS_IDS,
+                            target_label="vehicle",
+                        )
+                        is_complex, complexity_reason = is_complex_person_scene(
+                            preflight_boxes, preflight_width, preflight_height
+                        )
+                        if is_complex:
+                            try:
+                                vehicle_count, analysis, result_name, model_width, model_height = call_vehicle_yolo_judge_model(
+                                    upload_path,
+                                    image_record.id,
+                                    detection_config,
+                                    draw_vehicle_boxes,
+                                    preflight_boxes,
+                                    preflight_width,
+                                    preflight_height,
+                                    analysis_prefix=f"YOLO \u5feb\u901f\u9884\u5224\uff1a{complexity_reason}\uff0c\u5df2\u4ea4\u7ed9\u5927\u6a21\u578b\u88c1\u5224\u590d\u6838\u3002",
+                                )
+                            except Exception as llm_exc:
+                                vehicle_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                                    upload_path,
+                                    image_record.id,
+                                    {"provider": "auto_yolo_llm_fallback"},
+                                    draw_vehicle_boxes,
+                                    class_ids=VEHICLE_CLASS_IDS,
+                                    target_label="vehicle",
+                                    count_label="\u8f66\u8f86",
+                                    analysis_prefix=(
+                                        f"YOLO \u5feb\u901f\u9884\u5224\uff1a{complexity_reason}\uff0c\u4f46\u5927\u6a21\u578b\u8c03\u7528\u5931\u8d25\uff0c\u5df2\u56de\u9000\u672c\u5730 YOLO\u3002"
+                                        f"\u5927\u6a21\u578b\u9519\u8bef\uff1a{llm_exc}\u3002"
+                                    ),
+                                    precomputed_boxes=preflight_boxes,
+                                    precomputed_size=(preflight_width, preflight_height),
+                                )
+                        else:
+                            vehicle_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                                upload_path,
+                                image_record.id,
+                                {"provider": "auto_yolo_simple"},
+                                draw_vehicle_boxes,
+                                class_ids=VEHICLE_CLASS_IDS,
+                                target_label="vehicle",
+                                count_label="\u8f66\u8f86",
+                                analysis_prefix=f"YOLO \u5feb\u901f\u9884\u5224\uff1a{complexity_reason}\uff0c\u76f4\u63a5\u4f7f\u7528\u672c\u5730\u7ed3\u679c\u3002",
+                                precomputed_boxes=preflight_boxes,
+                                precomputed_size=(preflight_width, preflight_height),
+                            )
+                    else:
+                        vehicle_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                            upload_path,
+                            image_record.id,
+                            {"provider": "local_yolo_vehicle"},
+                            draw_vehicle_boxes,
+                            class_ids=VEHICLE_CLASS_IDS,
+                            target_label="vehicle",
+                            count_label="\u8f66\u8f86",
+                        )
+                    image_record.model_image_path = f"static/results/{result_name}"
+                    image_record.model_width = model_width
+                    image_record.model_height = model_height
+                    db.session.commit()
+                    result_image_url = url_for("static", filename=f"results/{result_name}")
+                except Exception as exc:
+                    error = f"\u8f66\u8f86\u68c0\u6d4b\u5931\u8d25\uff1a{exc}"
+                    logger.exception("\u8f66\u8f86\u68c0\u6d4b\u8fc7\u7a0b\u4e2d\u51fa\u9519")
+                    db.session.rollback()
+
+    return render_template(
+        "vehicle_image.html",
+        error=error,
+        success=success,
+        api_config=api_config,
+        api_providers=API_PROVIDERS,
+        has_api_key=bool(load_api_config().get("api_key")),
         vehicle_count=vehicle_count,
         analysis=analysis,
         result_image_url=result_image_url,
@@ -423,24 +818,6 @@ def cleanup_old_files():
 
     db.session.commit()
     return jsonify({"cleaned_records": cleaned})
-
-
-@app.route("/progress/detect")
-def progress_detect():
-    import time
-
-    def generate():
-        steps = [
-            {"step": 1, "message": "\u6b63\u5728\u52a0\u8f7d YOLO \u6a21\u578b..."},
-            {"step": 2, "message": "\u6b63\u5728\u6267\u884c YOLO \u68c0\u6d4b..."},
-            {"step": 3, "message": "\u6b63\u5728\u7ed8\u5236\u68c0\u6d4b\u7ed3\u679c..."},
-            {"step": 4, "message": "\u68c0\u6d4b\u5b8c\u6210"},
-        ]
-        for s in steps:
-            yield f"data: {json.dumps(s, ensure_ascii=False)}\n\n"
-            time.sleep(0.5)
-
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
 @app.route("/api/history/delete/<int:record_id>", methods=["DELETE"])

@@ -97,4 +97,9 @@ if (input) {
         submitButton.disabled = true;
         submitButton.textContent = "检测中...";
     });
+
+    window.addEventListener("pageshow", () => {
+        submitButton.disabled = false;
+        submitButton.textContent = "开始检测";
+    });
 }
