@@ -1,102 +1,80 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>历史检测记录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
-</head>
-<body>
-    <main class="app-shell">
-        <header class="app-header">
-            <div class="brand">
-                <p class="eyebrow">Detection History</p>
-                <h1>历史检测记录</h1>
+{% extends "base.html" %}
+{% block title %}历史检测记录 - YOLO 智能检测仪表盘{% endblock %}
+{% block page_title %}历史检测记录{% endblock %}
+{% block breadcrumb %}实时 & 数据 / 历史记录{% endblock %}
+
+{% block content %}
+{% if records %}
+<section class="history-list">
+    {% for record in records %}
+    <article class="surface record-card" data-record-id="{{ record.id }}">
+        <div class="record-image">
+            <img src="{{ url_for('static', filename='uploads/' + record.original_image_path.replace('\\', '/').split('/')[-1]) }}" alt="{{ record.original_filename }}">
+        </div>
+        <div class="record-details">
+            <div class="record-title-row">
+                <h2>{{ record.original_filename }}</h2>
+                <button class="button-danger delete-record" type="button" data-record-id="{{ record.id }}">删除</button>
             </div>
-            <nav class="header-actions">
-                <a href="{{ url_for('index') }}" class="button-secondary">图片检测</a>
-                <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
-                <a href="{{ url_for('vehicle_page') }}" class="button-secondary">车辆视频</a>
-                <a href="/vehicle-image" class="button-secondary">车辆图片</a>
-                <a href="{{ url_for('camera_page') }}" class="button-secondary">摄像头</a>
-                <a href="/api/history/export" class="button-secondary">导出图片检测</a>
-                <a href="/api/vehicle/image/export" class="button-secondary">导出车辆图片</a>
-                <a href="/api/video/export" class="button-secondary">导出视频检测</a>
-                <a href="/api/vehicle/video/export" class="button-secondary">导出车辆视频</a>
-            </nav>
-        </header>
+            <p>上传时间：{{ record.uploaded_at.strftime('%Y-%m-%d %H:%M:%S') if record.uploaded_at else '-' }}</p>
+            <p>原始尺寸：{{ record.original_width or '-' }} x {{ record.original_height or '-' }}</p>
+            <p>模型尺寸：{{ record.model_width or '-' }} x {{ record.model_height or '-' }}</p>
 
-        {% if records %}
-        <section class="history-list">
-            {% for record in records %}
-            <article class="surface record-card" data-record-id="{{ record.id }}">
-                <div class="record-image">
-                    <img src="{{ url_for('static', filename='uploads/' + record.original_image_path.replace('\\', '/').split('/')[-1]) }}" alt="{{ record.original_filename }}">
-                </div>
-                <div class="record-details">
-                    <div class="record-title-row">
-                        <h2>{{ record.original_filename }}</h2>
-                        <button class="button-danger delete-record" type="button" data-record-id="{{ record.id }}">删除</button>
-                    </div>
-                    <p>上传时间：{{ record.uploaded_at.strftime('%Y-%m-%d %H:%M:%S') if record.uploaded_at else '-' }}</p>
-                    <p>原始尺寸：{{ record.original_width or '-' }} x {{ record.original_height or '-' }}</p>
-                    <p>模型尺寸：{{ record.model_width or '-' }} x {{ record.model_height or '-' }}</p>
-
-                    {% if record.detections %}
-                    <div class="detection-list">
-                        {% for detection in record.detections %}
-                        <div class="detection-item">
-                            <p>检测时间：{{ detection.detected_at.strftime('%Y-%m-%d %H:%M:%S') if detection.detected_at else '-' }}</p>
-                            <p>人数：{{ detection.person_count }}</p>
-                            {% if detection.llm_analysis_text %}
-                            <p>{{ detection.llm_analysis_text }}</p>
-                            {% endif %}
-                            {% if detection.result_image_path %}
-                            <img src="{{ url_for('static', filename=detection.result_image_path.replace('\\', '/').split('static/')[-1]) }}" alt="检测结果">
-                            {% endif %}
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p>暂无检测结果。</p>
+            {% if record.detections %}
+            <div class="detection-list">
+                {% for detection in record.detections %}
+                <div class="detection-item">
+                    <p>检测时间：{{ detection.detected_at.strftime('%Y-%m-%d %H:%M:%S') if detection.detected_at else '-' }}</p>
+                    <p>人数：{{ detection.person_count }}</p>
+                    {% if detection.llm_analysis_text %}
+                    <p>{{ detection.llm_analysis_text }}</p>
+                    {% endif %}
+                    {% if detection.result_image_path %}
+                    <img src="{{ url_for('static', filename=detection.result_image_path.replace('\\', '/').split('static/')[-1]) }}" alt="检测结果">
                     {% endif %}
                 </div>
-            </article>
-            {% endfor %}
-        </section>
-
-        {% if pagination and pagination.pages > 1 %}
-        <nav class="pagination">
-            {% if pagination.has_prev %}
-            <a class="button-secondary" href="{{ url_for('history', page=pagination.prev_num) }}">上一页</a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p>暂无检测结果。</p>
             {% endif %}
-            <span>第 {{ pagination.page }} / {{ pagination.pages }} 页</span>
-            {% if pagination.has_next %}
-            <a class="button-secondary" href="{{ url_for('history', page=pagination.next_num) }}">下一页</a>
-            {% endif %}
-        </nav>
-        {% endif %}
-        {% else %}
-        <section class="surface empty-state">目前没有历史检测记录。</section>
-        {% endif %}
-    </main>
+        </div>
+    </article>
+    {% endfor %}
+</section>
 
-    <script>
-        document.querySelectorAll(".delete-record").forEach((button) => {
-            button.addEventListener("click", async () => {
-                if (!confirm("确定删除这条记录吗？")) {
-                    return;
-                }
-                const id = button.dataset.recordId;
-                const response = await fetch(`/api/history/delete/${id}`, { method: "DELETE" });
-                const data = await response.json();
-                if (data.success) {
-                    document.querySelector(`[data-record-id="${id}"]`).remove();
-                } else {
-                    alert(data.error || "删除失败");
-                }
-            });
+{% if pagination and pagination.pages > 1 %}
+<nav class="pagination">
+    {% if pagination.has_prev %}
+    <a class="button-secondary" href="{{ url_for('history', page=pagination.prev_num) }}">上一页</a>
+    {% endif %}
+    <span>第 {{ pagination.page }} / {{ pagination.pages }} 页</span>
+    {% if pagination.has_next %}
+    <a class="button-secondary" href="{{ url_for('history', page=pagination.next_num) }}">下一页</a>
+    {% endif %}
+</nav>
+{% endif %}
+{% else %}
+<section class="surface empty-state">目前没有历史检测记录。</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.querySelectorAll(".delete-record").forEach((button) => {
+        button.addEventListener("click", async () => {
+            if (!confirm("确定删除这条记录吗？")) {
+                return;
+            }
+            const id = button.dataset.recordId;
+            const response = await fetch(`/api/history/delete/${id}`, { method: "DELETE" });
+            const data = await response.json();
+            if (data.success) {
+                document.querySelector(`[data-record-id="${id}"]`).remove();
+            } else {
+                alert(data.error || "删除失败");
+            }
         });
-    </script>
-</body>
-</html>
+    });
+</script>
+{% endblock %}

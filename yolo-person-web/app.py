@@ -150,6 +150,15 @@ def save_api_config(provider: str, api_url: str, api_key: str, model: str) -> No
     )
 
 
+@app.context_processor
+def inject_globals():
+    return {
+        "api_providers": API_PROVIDERS,
+        "api_config": load_api_config_for_display(),
+        "has_api_key": bool(load_api_config().get("api_key")),
+    }
+
+
 def normalize_chat_endpoint(api_url: str) -> str:
     cleaned = api_url.strip().rstrip("/")
     if not cleaned:
@@ -302,6 +311,126 @@ def index():
     )
 
 
+@app.route("/person-image", methods=["GET", "POST"])
+def person_image_page():
+    error = None
+    success = None
+    person_count = None
+    analysis = None
+    result_image_url = None
+    original_filename = None
+    api_config = load_api_config_for_display()
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "save_api":
+            provider = request.form.get("provider", "custom")
+            api_url = request.form.get("api_url", "")
+            api_key = request.form.get("api_key", "")
+            model = request.form.get("model", "")
+            current_api_config = load_api_config()
+            submitted_api_key = api_key.strip()
+            if (not submitted_api_key or is_masked_api_key(submitted_api_key)) and not current_api_config.get("api_key"):
+                error = "请填写完整 API Key，不能使用已加密的 Key。"
+            else:
+                save_api_config(provider, api_url, api_key, model)
+                api_config = load_api_config_for_display()
+                success = "API 配置已保存。"
+        else:
+            file = request.files.get("image")
+            if file is None or file.filename == "":
+                error = "请先选择一张图片。"
+            elif not allowed_file(file.filename):
+                error = "只支持 jpg、jpeg、png、bmp、webp 格式。"
+            else:
+                original_filename = file.filename
+                suffix = Path(original_filename).suffix.lower()
+                upload_name = f"{uuid4().hex}{suffix}"
+                upload_path = UPLOAD_DIR / upload_name
+                file.save(upload_path)
+
+                with Image.open(upload_path) as img:
+                    original_width, original_height = img.size
+
+                image_record = ImageRecord(
+                    original_filename=original_filename,
+                    original_image_path=str(upload_path),
+                    original_width=original_width,
+                    original_height=original_height,
+                )
+                db.session.add(image_record)
+                db.session.commit()
+
+                try:
+                    detection_config = load_api_config()
+                    if detection_config.get("api_key"):
+                        preflight_boxes, preflight_width, preflight_height = run_yolo_detection(upload_path)
+                        is_complex, complexity_reason = is_complex_person_scene(
+                            preflight_boxes, preflight_width, preflight_height
+                        )
+                        if is_complex:
+                            try:
+                                person_count, analysis, result_name, model_width, model_height = call_yolo_judge_model(
+                                    upload_path,
+                                    image_record.id,
+                                    detection_config,
+                                    draw_person_boxes,
+                                    preflight_boxes,
+                                    preflight_width,
+                                    preflight_height,
+                                    analysis_prefix=f"YOLO 快速预判：{complexity_reason}，已交给大模型裁判复核。",
+                                )
+                            except Exception as llm_exc:
+                                person_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                                    upload_path,
+                                    image_record.id,
+                                    {"provider": "auto_yolo_llm_fallback"},
+                                    draw_person_boxes,
+                                    analysis_prefix=(
+                                        f"YOLO 快速预判：{complexity_reason}，但大模型调用失败，已回退本地 YOLO。"
+                                        f"大模型错误：{llm_exc}。"
+                                    ),
+                                    precomputed_boxes=preflight_boxes,
+                                    precomputed_size=(preflight_width, preflight_height),
+                                )
+                        else:
+                            person_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                                upload_path,
+                                image_record.id,
+                                {"provider": "auto_yolo_simple"},
+                                draw_person_boxes,
+                                analysis_prefix=f"YOLO 快速预判：{complexity_reason}，直接使用本地结果。",
+                                precomputed_boxes=preflight_boxes,
+                                precomputed_size=(preflight_width, preflight_height),
+                            )
+                    else:
+                        person_count, analysis, result_name, model_width, model_height = call_local_yolo(
+                            upload_path, image_record.id, {"provider": "local_yolo"}, draw_person_boxes
+                        )
+                    image_record.model_image_path = f"static/results/{result_name}"
+                    image_record.model_width = model_width
+                    image_record.model_height = model_height
+                    db.session.commit()
+                    result_image_url = url_for("static", filename=f"results/{result_name}")
+                except Exception as exc:
+                    error = f"检测失败：{exc}"
+                    logger.exception("检测过程中出错")
+                    db.session.rollback()
+
+    return render_template(
+        "person_image.html",
+        error=error,
+        success=success,
+        api_config=api_config,
+        api_providers=API_PROVIDERS,
+        has_api_key=bool(load_api_config().get("api_key")),
+        person_count=person_count,
+        analysis=analysis,
+        result_image_url=result_image_url,
+        original_filename=original_filename,
+    )
+
+
 @app.route("/history")
 def history():
     page = request.args.get("page", 1, type=int)
@@ -311,6 +440,11 @@ def history():
         page=page, per_page=per_page, error_out=False
     )
     return render_template("history.html", pagination=pagination, records=pagination.items)
+
+
+@app.route("/data-export")
+def data_export():
+    return render_template("data_export.html")
 
 
 @app.route("/camera")
