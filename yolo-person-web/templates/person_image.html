@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}YOLO 车辆检测 - YOLO 智能检测仪表盘{% endblock %}
-{% block page_title %}YOLO 车辆检测{% endblock %}
-{% block breadcrumb %}车辆检测 / 车辆图片{% endblock %}
+{% block title %}YOLO 行人检测 - YOLO 智能检测仪表盘{% endblock %}
+{% block page_title %}YOLO 行人检测{% endblock %}
+{% block breadcrumb %}人员检测 / 人员图片{% endblock %}
 
 {% block content %}
 <section class="workspace">
@@ -9,7 +9,7 @@
         <div class="surface-header">
             <div>
                 <h2 class="surface-title">上传图片</h2>
-                <p>选择或拖拽一张图片，系统会使用本地 YOLO 检测车辆并标注。</p>
+                <p>选择或拖拽一张图片，系统会使用本地 YOLO 检测行人并标注。</p>
             </div>
             <span class="api-status">{% if has_api_key %}智能分流{% else %}本地 YOLO{% endif %}</span>
         </div>
@@ -56,11 +56,11 @@
 <div class="message">{{ success }}</div>
 {% endif %}
 
-{% if vehicle_count is not none %}
+{% if person_count is not none %}
 <section class="result">
     <div class="surface result-summary">
-        <div class="count-label">检测车辆数</div>
-        <div class="count">{{ vehicle_count }}</div>
+        <div class="count-label">检测人数</div>
+        <div class="count">{{ person_count }}</div>
         <div class="result-meta">
             {% if original_filename %}
             <p>图片文件：{{ original_filename }}</p>

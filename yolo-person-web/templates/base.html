@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}YOLO 智能检测仪表盘{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <meta name="current-endpoint" content="{{ request.endpoint or '' }}">
+    {% block head_extra %}{% endblock %}
+</head>
+<body{% block body_attrs %}{% endblock %}>
+    <div class="dashboard" id="dashboard">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-brand">
+                    <div class="brand-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2a10 10 0 1010 10"/>
+                            <path d="M12 12l4-4"/>
+                            <circle cx="12" cy="12" r="2"/>
+                        </svg>
+                    </div>
+                    <div class="brand-text">
+                        <span class="brand-name">YOLO 检测</span>
+                        <span class="brand-version">v2.0 仪表盘</span>
+                    </div>
+                </div>
+                <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="切换侧边栏">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="6" x2="21" y2="6"/>
+                        <line x1="3" y1="12" x2="21" y2="12"/>
+                        <line x1="3" y1="18" x2="21" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <span class="nav-section-title">核心功能</span>
+                    <a href="{{ url_for('index') }}" class="nav-item {% if request.endpoint == 'index' %}active{% endif %}" data-tip="主页">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                                <polyline points="9 22 9 12 15 12 15 22"/>
+                            </svg>
+                        </span>
+                        <span class="nav-label">主页</span>
+                    </a>
+
+                    <div class="nav-group">
+                        <button class="nav-item nav-toggle" type="button" data-target="imageDetectionSub" aria-expanded="false">
+                            <span class="nav-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                                    <path d="M21 15l-5-5L5 21"/>
+                                </svg>
+                            </span>
+                            <span class="nav-label">图片检测</span>
+                            <svg class="nav-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                        </button>
+                        <div class="nav-submenu" id="imageDetectionSub">
+                            <a href="{{ url_for('person_image_page') }}" class="nav-sub-item {% if request.endpoint == 'person_image_page' %}active{% endif %}">行人检测</a>
+                            <a href="/vehicle-image" class="nav-sub-item {% if request.endpoint == 'vehicle_image_page' %}active{% endif %}">车辆检测</a>
+                        </div>
+                    </div>
+
+                    <div class="nav-group">
+                        <button class="nav-item nav-toggle" type="button" data-target="videoDetectionSub" aria-expanded="false">
+                            <span class="nav-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polygon points="23 7 16 12 23 17 23 7"/>
+                                    <rect x="1" y="5" width="15" height="14" rx="2"/>
+                                </svg>
+                            </span>
+                            <span class="nav-label">视频检测</span>
+                            <svg class="nav-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                        </button>
+                        <div class="nav-submenu" id="videoDetectionSub">
+                            <a href="{{ url_for('video_page') }}" class="nav-sub-item {% if request.endpoint == 'video_page' %}active{% endif %}">行人检测</a>
+                            <a href="{{ url_for('vehicle_page') }}" class="nav-sub-item {% if request.endpoint == 'vehicle_page' %}active{% endif %}">车辆检测</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <span class="nav-section-title">实时 & 数据</span>
+                    <a href="{{ url_for('camera_page') }}" class="nav-item {% if request.endpoint == 'camera_page' %}active{% endif %}" data-tip="摄像头">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M15 10l4.55-2.27A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                            </svg>
+                        </span>
+                        <span class="nav-label">摄像头</span>
+                    </a>
+                    <a href="{{ url_for('history') }}" class="nav-item {% if request.endpoint == 'history' %}active{% endif %}" data-tip="历史记录">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                        </span>
+                        <span class="nav-label">历史记录</span>
+                    </a>
+                    <a href="{{ url_for('data_export') }}" class="nav-item {% if request.endpoint == 'data_export' %}active{% endif %}" data-tip="数据导出">
+                        <span class="nav-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                        </span>
+                        <span class="nav-label">数据导出</span>
+                    </a>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">系统运行中</span>
+                </div>
+            </div>
+        </aside>
+
+        <div class="main-wrapper">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="topbar-menu-btn" id="topbarMenuBtn" type="button" aria-label="菜单">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="6" x2="21" y2="6"/>
+                            <line x1="3" y1="12" x2="21" y2="12"/>
+                            <line x1="3" y1="18" x2="21" y2="18"/>
+                        </svg>
+                    </button>
+                    <div class="topbar-title">
+                        <h2>{% block page_title %}仪表盘{% endblock %}</h2>
+                        <span class="topbar-breadcrumb">{% block breadcrumb %}主页 / 仪表盘{% endblock %}</span>
+                    </div>
+                </div>
+                <div class="topbar-right">
+                    <button class="topbar-action-btn" type="button" id="openApiButton" title="API 配置">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2a10 10 0 1010 10"/>
+                            <path d="M12 12l4-4"/>
+                            <circle cx="12" cy="12" r="2"/>
+                        </svg>
+                    </button>
+
+                    <div class="topbar-user">
+                        <div class="user-avatar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
+                            </svg>
+                        </div>
+                        <div class="user-info">
+                            <span class="user-name">管理员</span>
+                            <span class="user-role">本地部署</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main class="main-content">
+                {% block content %}{% endblock %}
+            </main>
+
+            <footer class="app-footer">
+                <span>YOLO 智能检测系统 v2.0</span>
+                <span>基于 Flask + YOLOv8</span>
+            </footer>
+        </div>
+    </div>
+
+    <div class="api-modal" id="apiModal" aria-hidden="true">
+        <section class="api-panel" role="dialog" aria-modal="true" aria-labelledby="apiTitle">
+            <header>
+                <h2 id="apiTitle">添加 API</h2>
+                <button class="icon-button" type="button" id="closeApiButton" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </header>
+            <form method="post" id="apiForm">
+                <input type="hidden" name="action" value="save_api">
+                <div class="field">
+                    <label for="provider">服务商</label>
+                    <select id="provider" name="provider">
+                        {% for provider_id, provider in api_providers.items() %}
+                        <option
+                            value="{{ provider_id }}"
+                            data-url="{{ provider.api_url }}"
+                            data-model="{{ provider.model }}"
+                            {% if api_config.provider == provider_id %}selected{% endif %}
+                        >
+                            {{ provider.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="apiUrl">API 地址</label>
+                    <input id="apiUrl" name="api_url" type="url" value="{{ api_config.api_url }}" required>
+                </div>
+                <div class="field">
+                    <label for="apiKey">API Key</label>
+                    <input
+                        id="apiKey"
+                        name="api_key"
+                        type="password"
+                        value=""
+                        placeholder="{% if api_config.api_key_masked %}已保存 {{ api_config.api_key_masked }}，留空不修改{% else %}请输入完整 API Key{% endif %}"
+                        {% if not api_config.api_key_masked %}required{% endif %}
+                    >
+                </div>
+                <div class="field">
+                    <label for="model">模型名称</label>
+                    <input id="model" name="model" type="text" value="{{ api_config.model }}" required>
+                </div>
+                <div class="form-actions">
+                    <button type="submit">保存 API</button>
+                    <button class="button-secondary" type="button" id="cancelApiButton">取消</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <div class="toast" id="globalToast" role="status" aria-live="polite"></div>
+
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

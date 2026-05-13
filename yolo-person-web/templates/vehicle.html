@@ -1,88 +1,71 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>车辆视频检测</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
-</head>
-<body data-detection-target="vehicle" data-video-api-base="/api/vehicle/video" data-shared-video-api-base="/api/video">
-    <main class="app-shell">
-        <header class="app-header">
-            <div class="brand">
-                <p class="eyebrow">Vehicle Video Detection</p>
-                <h1>车辆视频检测</h1>
+{% extends "base.html" %}
+{% block title %}车辆视频检测 - YOLO 智能检测仪表盘{% endblock %}
+{% block page_title %}车辆视频检测{% endblock %}
+{% block breadcrumb %}车辆检测 / 车辆视频{% endblock %}
+{% block body_attrs %} data-detection-target="vehicle" data-video-api-base="/api/vehicle/video" data-shared-video-api-base="/api/video"{% endblock %}
+
+{% block content %}
+<section class="workspace">
+    <div class="surface upload-surface">
+        <div class="surface-header">
+            <div>
+                <h2 class="surface-title">上传车辆视频</h2>
+                <p>支持 mp4、avi、mov、mkv、webm、flv，系统会检测并标注自行车、小汽车、摩托车、公交车和卡车。</p>
             </div>
-            <nav class="header-actions">
-                <a href="{{ url_for('index') }}" class="button-secondary">图片检测</a>
-                <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
-                <a href="/vehicle-image" class="button-secondary">车辆图片</a>
-                <a href="{{ url_for('camera_page') }}" class="button-secondary">摄像头</a>
-                <a href="{{ url_for('history') }}" class="button-secondary">历史记录</a>
-            </nav>
-        </header>
-
-        <section class="workspace">
-            <div class="surface upload-surface">
-                <div class="surface-header">
-                    <div>
-                        <h2 class="surface-title">上传车辆视频</h2>
-                        <p>支持 mp4、avi、mov、mkv、webm、flv，系统会检测并标注自行车、小汽车、摩托车、公交车和卡车。</p>
-                    </div>
-                    <span class="api-status">本地 YOLO</span>
+            <span class="api-status">本地 YOLO</span>
+        </div>
+        <form id="videoForm">
+            <label class="dropzone video-dropzone" id="videoDropzone" for="videoInput">
+                <span class="dropzone-main">
+                    <span class="upload-mark">+</span>
+                    <strong>拖拽视频到这里</strong>
+                    <span>也可以点击选择文件。</span>
+                </span>
+                <span class="upload-video-preview" id="uploadVideoPreview" hidden>
+                    <video id="uploadPreviewVideo" controls preload="metadata"></video>
+                    <span class="upload-preview-caption" id="uploadPreviewCaption"></span>
+                </span>
+                <input id="videoInput" type="file" name="video" accept=".mp4,.avi,.mov,.mkv,.webm,.flv" required>
+            </label>
+            <div class="file-row video-file-row">
+                <div class="selected-file">
+                    <div class="file-name" id="videoFileName">还没有选择视频</div>
+                    <div class="file-meta" id="videoFileMeta">最大 500MB</div>
                 </div>
-                <form id="videoForm">
-                    <label class="dropzone video-dropzone" id="videoDropzone" for="videoInput">
-                        <span class="dropzone-main">
-                            <span class="upload-mark">+</span>
-                            <strong>拖拽视频到这里</strong>
-                            <span>也可以点击选择文件。</span>
-                        </span>
-                        <span class="upload-video-preview" id="uploadVideoPreview" hidden>
-                            <video id="uploadPreviewVideo" controls preload="metadata"></video>
-                            <span class="upload-preview-caption" id="uploadPreviewCaption"></span>
-                        </span>
-                        <input id="videoInput" type="file" name="video" accept=".mp4,.avi,.mov,.mkv,.webm,.flv" required>
-                    </label>
-                    <div class="file-row video-file-row">
-                        <div class="selected-file">
-                            <div class="file-name" id="videoFileName">还没有选择视频</div>
-                            <div class="file-meta" id="videoFileMeta">最大 500MB</div>
-                        </div>
-                        <button type="submit" id="videoSubmitButton" disabled>开始检测</button>
-                    </div>
-                </form>
+                <button type="submit" id="videoSubmitButton" disabled>开始检测</button>
             </div>
+        </form>
+    </div>
 
-            <aside class="surface progress-panel">
-                <h2 class="surface-title">处理进度</h2>
-                <div class="progress-row">
-                    <div class="progress-bar"><span id="progressFill"></span></div>
-                    <strong class="progress-percent" id="progressPercent">0%</strong>
-                </div>
-                <p id="progressText">等待上传车辆视频</p>
-                <div class="video-stats" id="videoStats" hidden>
-                    <div class="video-stat video-stat-primary">
-                        <span>当前画面车辆数</span>
-                        <strong id="currentPersons">0</strong>
-                    </div>
-                </div>
-                <div class="video-result" id="videoResult"></div>
-            </aside>
-        </section>
-
-        <section class="surface video-history">
-            <div class="surface-header">
-                <div>
-                    <h2 class="surface-title">车辆视频记录</h2>
-                    <p>最近上传和处理的车辆视频，可直接预览已完成结果。</p>
-                </div>
-                <button class="button-secondary" type="button" id="refreshVideoHistory">刷新</button>
+    <aside class="surface progress-panel">
+        <h2 class="surface-title">处理进度</h2>
+        <div class="progress-row">
+            <div class="progress-bar"><span id="progressFill"></span></div>
+            <strong class="progress-percent" id="progressPercent">0%</strong>
+        </div>
+        <p id="progressText">等待上传车辆视频</p>
+        <div class="video-stats" id="videoStats" hidden>
+            <div class="video-stat video-stat-primary">
+                <span>当前画面车辆数</span>
+                <strong id="currentPersons">0</strong>
             </div>
-            <div id="videoHistoryList" class="video-history-list">正在加载...</div>
-        </section>
-    </main>
+        </div>
+        <div class="video-result" id="videoResult"></div>
+    </aside>
+</section>
 
-    <script src="{{ url_for('static', filename='video.js') }}"></script>
-</body>
-</html>
+<section class="surface video-history">
+    <div class="surface-header">
+        <div>
+            <h2 class="surface-title">车辆视频记录</h2>
+            <p>最近上传和处理的车辆视频，可直接预览已完成结果。</p>
+        </div>
+        <button class="button-secondary" type="button" id="refreshVideoHistory">刷新</button>
+    </div>
+    <div id="videoHistoryList" class="video-history-list">正在加载...</div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='video.js') }}"></script>
+{% endblock %}

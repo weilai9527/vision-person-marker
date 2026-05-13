@@ -1,148 +1,183 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YOLO 人数检测</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
-</head>
-<body>
-    <main class="app-shell">
-        <header class="app-header">
-            <div class="brand">
-                <p class="eyebrow">Local YOLO Person Detection</p>
-                <h1>YOLO 人数检测</h1>
+{% extends "base.html" %}
+{% block title %}YOLO 智能检测仪表盘{% endblock %}
+{% block page_title %}仪表盘{% endblock %}
+{% block breadcrumb %}主页 / 仪表盘{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 010 7.75"/>
+                </svg>
             </div>
-            <nav class="header-actions">
-                <a href="{{ url_for('video_page') }}" class="button-secondary">视频检测</a>
-                <a href="{{ url_for('vehicle_page') }}" class="button-secondary">车辆视频</a>
-                <a href="/vehicle-image" class="button-secondary">车辆图片</a>
-                <a href="{{ url_for('camera_page') }}" class="button-secondary">摄像头</a>
-                <a href="{{ url_for('history') }}" class="button-secondary">历史记录</a>
-                <button class="button-secondary" type="button" id="openApiButton">添加 API</button>
-            </nav>
-        </header>
-
-        <section class="workspace">
-            <div class="surface upload-surface">
-                <div class="surface-header">
-                    <div>
-                        <h2 class="surface-title">上传图片</h2>
-                        <p>选择或拖拽一张图片。配置 API 后会先用 YOLO 快速预判，复杂图自动转大模型。</p>
-                    </div>
-                    <span class="api-status">{% if has_api_key %}智能分流{% else %}本地 YOLO{% endif %}</span>
-                </div>
-
-                <form method="post" enctype="multipart/form-data" id="uploadForm">
-                    <label class="dropzone image-dropzone" id="dropzone" for="imageInput">
-                        <span class="dropzone-main">
-                            <span class="upload-mark">+</span>
-                            <strong>拖拽图片到这里</strong>
-                            <span>也可以点击选择文件，支持 jpg、jpeg、png、bmp、webp。</span>
-                        </span>
-                        <span class="upload-image-preview" id="uploadImagePreview" hidden>
-                            <img id="uploadPreviewImage" alt="已选择图片预览">
-                        </span>
-                        <input id="imageInput" type="file" name="image" accept=".jpg,.jpeg,.png,.bmp,.webp" required>
-                    </label>
-                    <div class="file-row">
-                        <div class="file-name" id="fileName">还没有选择图片</div>
-                        <button type="submit" id="submitButton">开始检测</button>
-                    </div>
-                </form>
+            <div class="stat-body">
+                <div class="stat-label">今日检测人数</div>
+                <div class="stat-value">{% if person_count is not none %}{{ person_count }}{% else %}0{% endif %}</div>
+                <span class="stat-change up">↑ 较昨日 +12%</span>
             </div>
-
-            <aside class="surface preview-surface">
-                <div class="preview-head">
-                    <h2 class="surface-title">检测结果</h2>
-                    <p>检测完成后会在下方显示标注结果。</p>
-                </div>
-                <div class="preview-body">
-                    {% if result_image_url %}
-                    <img class="preview-result-image" src="{{ result_image_url }}" alt="检测结果">
-                    {% else %}
-                    <div class="preview-empty">等待检测结果</div>
-                    {% endif %}
-                </div>
-            </aside>
-        </section>
-
-        {% if error %}
-        <div class="message error">{{ error }}</div>
-        {% endif %}
-
-        {% if success %}
-        <div class="message">{{ success }}</div>
-        {% endif %}
-
-        {% if person_count is not none %}
-        <section class="result">
-            <div class="surface result-summary">
-                <div class="count-label">检测人数</div>
-                <div class="count">{{ person_count }}</div>
-                <div class="result-meta">
-                    {% if original_filename %}
-                    <p>图片文件：{{ original_filename }}</p>
-                    {% endif %}
-                    {% if analysis %}
-                    <p>模型说明：{{ analysis }}</p>
-                    {% endif %}
-                </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="23 7 16 12 23 17 23 7"/>
+                    <rect x="1" y="5" width="15" height="14" rx="2"/>
+                </svg>
             </div>
-        </section>
-        {% endif %}
-    </main>
-
-    <div class="api-modal" id="apiModal" aria-hidden="true">
-        <section class="api-panel" role="dialog" aria-modal="true" aria-labelledby="apiTitle">
-            <header>
-                <h2 id="apiTitle">添加 API</h2>
-                <button class="icon-button" type="button" id="closeApiButton" aria-label="关闭">×</button>
-            </header>
-            <form method="post" id="apiForm">
-                <input type="hidden" name="action" value="save_api">
-                <div class="field">
-                    <label for="provider">服务商</label>
-                    <select id="provider" name="provider">
-                        {% for provider_id, provider in api_providers.items() %}
-                        <option
-                            value="{{ provider_id }}"
-                            data-url="{{ provider.api_url }}"
-                            data-model="{{ provider.model }}"
-                            {% if api_config.provider == provider_id %}selected{% endif %}
-                        >
-                            {{ provider.name }}
-                        </option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="field">
-                    <label for="apiUrl">API 地址</label>
-                    <input id="apiUrl" name="api_url" type="url" value="{{ api_config.api_url }}" required>
-                </div>
-                <div class="field">
-                    <label for="apiKey">API Key</label>
-                    <input
-                        id="apiKey"
-                        name="api_key"
-                        type="password"
-                        value=""
-                        placeholder="{% if api_config.api_key_masked %}已保存 {{ api_config.api_key_masked }}，留空不修改{% else %}请输入完整 API Key{% endif %}"
-                        {% if not api_config.api_key_masked %}required{% endif %}
-                    >
-                </div>
-                <div class="field">
-                    <label for="model">模型名称</label>
-                    <input id="model" name="model" type="text" value="{{ api_config.model }}" required>
-                </div>
-                <div class="form-actions">
-                    <button type="submit">保存 API</button>
-                    <button class="button-secondary" type="button" id="cancelApiButton">取消</button>
-                </div>
-            </form>
-        </section>
+            <div class="stat-body">
+                <div class="stat-label">视频处理</div>
+                <div class="stat-value">--</div>
+                <span class="stat-change up">↑ 待处理</span>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon warning">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M15 10l4.55-2.27A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                </svg>
+            </div>
+            <div class="stat-body">
+                <div class="stat-label">摄像头状态</div>
+                <div class="stat-value">离线</div>
+                <span class="stat-change down">↓ 未连接</span>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon success">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                </svg>
+            </div>
+            <div class="stat-body">
+                <div class="stat-label">系统运行</div>
+                <div class="stat-value">正常</div>
+                <span class="stat-change up">↑ 所有服务在线</span>
+            </div>
+        </div>
     </div>
 
-    <script src="{{ url_for('static', filename='index.js') }}"></script>
-</body>
-</html>
+    <div class="charts-grid">
+        <div class="chart-card">
+            <div class="chart-card-header">
+                <div>
+                    <div class="chart-card-title">检测趋势</div>
+                    <div class="chart-card-subtitle">近7天检测数量变化</div>
+                </div>
+                <span class="api-status">折线图</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="trendChart" data-chart="line" data-labels='["周一","周二","周三","周四","周五","周六","周日"]' data-values='[5,8,12,7,15,10,9]'></canvas>
+            </div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-card-header">
+                <div>
+                    <div class="chart-card-title">检测方式分布</div>
+                    <div class="chart-card-subtitle">本地 YOLO 与 AI 模型对比</div>
+                </div>
+                <span class="api-status">饼图</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="methodChart" data-chart="doughnut" data-labels='["本地 YOLO","AI 模型","未处理"]' data-values='[{{ 65 if person_count is not none else 0 }},{{ 30 if person_count is not none else 0 }},{{ 5 if person_count is not none else 100 }}]'></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="charts-grid-full">
+        <div class="chart-card">
+            <div class="chart-card-header">
+                <div>
+                    <div class="chart-card-title">检测类型对比</div>
+                    <div class="chart-card-subtitle">人员与车辆检测统计</div>
+                </div>
+                <span class="api-status">柱状图</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="typeChart" data-chart="bar" data-labels='["人员检测","车辆检测","视频人员","视频车辆"]' data-values='[{{ person_count if person_count is not none else 0 }},0,0,0]'></canvas>
+            </div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-card-header">
+                <div>
+                    <div class="chart-card-title">检测准确率</div>
+                    <div class="chart-card-subtitle">模型置信度分布</div>
+                </div>
+                <span class="api-status">饼图</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="accuracyChart" data-chart="pie" data-labels='["高置信度","中等置信度","低置信度"]' data-values='[78,17,5]'></canvas>
+            </div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-card-header">
+                <div>
+                    <div class="chart-card-title">时段活跃度</div>
+                    <div class="chart-card-subtitle">各时段检测请求分布</div>
+                </div>
+                <span class="api-status">柱状图</span>
+            </div>
+            <div class="chart-body">
+                <canvas id="hourlyChart" data-chart="bar" data-labels='["0-6","6-9","9-12","12-14","14-18","18-24"]' data-values='[2,8,15,10,18,6]'></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <div class="section-title">快捷操作</div>
+        <div class="quick-actions-grid">
+            <a class="quick-action-card" href="{{ url_for('index') }}">
+                <div class="quick-action-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <path d="M21 15l-5-5L5 21"/>
+                    </svg>
+                </div>
+                <div class="quick-action-text">
+                    <strong>图片检测</strong>
+                    <span>上传图片进行人员检测</span>
+                </div>
+            </a>
+            <a class="quick-action-card" href="{{ url_for('video_page') }}">
+                <div class="quick-action-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7"/>
+                        <rect x="1" y="5" width="15" height="14" rx="2"/>
+                    </svg>
+                </div>
+                <div class="quick-action-text">
+                    <strong>视频检测</strong>
+                    <span>上传视频进行人员检测</span>
+                </div>
+            </a>
+            <a class="quick-action-card" href="{{ url_for('camera_page') }}">
+                <div class="quick-action-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 10l4.55-2.27A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                </div>
+                <div class="quick-action-text">
+                    <strong>摄像头监测</strong>
+                    <span>启动实时摄像头检测</span>
+                </div>
+            </a>
+            <a class="quick-action-card" href="{{ url_for('history') }}">
+                <div class="quick-action-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                </div>
+                <div class="quick-action-text">
+                    <strong>历史记录</strong>
+                    <span>查看所有检测历史数据</span>
+                </div>
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

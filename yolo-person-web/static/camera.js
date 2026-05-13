@@ -9,7 +9,7 @@
     const placeholder = document.getElementById("cameraPlaceholder");
     const detectPlaceholder = document.getElementById("cameraDetectPlaceholder");
     const hint = document.getElementById("cameraHint");
-    const toast = document.getElementById("cameraToast");
+    const toast = document.getElementById("globalToast");
     const overlay = document.getElementById("cameraOverlay");
     const monitorButton = document.getElementById("monitorCameraButton");
     const targetToggleButton = document.getElementById("targetToggleButton");
