@@ -81,6 +81,16 @@ def ensure_video_record_columns() -> None:
             text("ALTER TABLE video_record ADD COLUMN detection_target VARCHAR(20) NOT NULL DEFAULT 'person'")
         )
         db.session.commit()
+    if "unique_count" not in columns:
+        db.session.execute(
+            text("ALTER TABLE video_record ADD COLUMN unique_count INTEGER NOT NULL DEFAULT 0")
+        )
+        db.session.commit()
+    if "sum_count" not in columns:
+        db.session.execute(
+            text("ALTER TABLE video_record ADD COLUMN sum_count INTEGER NOT NULL DEFAULT 0")
+        )
+        db.session.commit()
 
 
 with app.app_context():
@@ -654,7 +664,7 @@ def export_video_history():
         "\u8bb0\u5f55ID", "\u539f\u59cb\u6587\u4ef6\u540d", "\u4e0a\u4f20\u65f6\u95f4",
         "\u68c0\u6d4b\u76ee\u6807", "\u72b6\u6001", "\u603b\u5e27\u6570", "\u5904\u7406\u5e27\u6570",
         "\u89c6\u9891\u5c3a\u5bf8", "FPS", "\u65f6\u957f(\u79d2)", "\u6700\u5927\u4eba\u6570/\u8f66\u8f86\u6570",
-        "\u5e73\u5747\u7f6e\u4fe1\u5ea6", "\u9519\u8bef\u4fe1\u606f",
+        "\u53bb\u91cd\u540e\u603b\u6570", "\u5e73\u5747\u7f6e\u4fe1\u5ea6", "\u9519\u8bef\u4fe1\u606f",
     ]
     ws.append(headers)
     for cell in ws[1]:
@@ -675,6 +685,7 @@ def export_video_history():
             round(record.fps, 2) if record.fps else "",
             round(record.duration, 2) if record.duration else "",
             record.total_persons,
+            record.unique_count or record.total_persons or 0,
             round(record.avg_confidence, 4) if record.avg_confidence else "",
             record.error_message or "",
         ])
@@ -690,8 +701,9 @@ def export_video_history():
     ws.column_dimensions["I"].width = 8
     ws.column_dimensions["J"].width = 12
     ws.column_dimensions["K"].width = 18
-    ws.column_dimensions["L"].width = 14
-    ws.column_dimensions["M"].width = 40
+    ws.column_dimensions["L"].width = 18
+    ws.column_dimensions["M"].width = 14
+    ws.column_dimensions["N"].width = 40
 
     buffer = BytesIO()
     wb.save(buffer)
@@ -714,7 +726,7 @@ def export_vehicle_video_history():
         "\u8bb0\u5f55ID", "\u539f\u59cb\u6587\u4ef6\u540d", "\u4e0a\u4f20\u65f6\u95f4",
         "\u68c0\u6d4b\u76ee\u6807", "\u72b6\u6001", "\u603b\u5e27\u6570", "\u5904\u7406\u5e27\u6570",
         "\u89c6\u9891\u5c3a\u5bf8", "FPS", "\u65f6\u957f(\u79d2)", "\u6700\u5927\u8f66\u8f86\u6570",
-        "\u5e73\u5747\u7f6e\u4fe1\u5ea6", "\u9519\u8bef\u4fe1\u606f",
+        "\u53bb\u91cd\u540e\u603b\u6570", "\u5e73\u5747\u7f6e\u4fe1\u5ea6", "\u9519\u8bef\u4fe1\u606f",
     ]
     ws.append(headers)
     for cell in ws[1]:
@@ -735,6 +747,7 @@ def export_vehicle_video_history():
             round(record.fps, 2) if record.fps else "",
             round(record.duration, 2) if record.duration else "",
             record.total_persons,
+            record.unique_count or record.total_persons or 0,
             round(record.avg_confidence, 4) if record.avg_confidence else "",
             record.error_message or "",
         ])
@@ -750,8 +763,9 @@ def export_vehicle_video_history():
     ws.column_dimensions["I"].width = 8
     ws.column_dimensions["J"].width = 12
     ws.column_dimensions["K"].width = 18
-    ws.column_dimensions["L"].width = 14
-    ws.column_dimensions["M"].width = 40
+    ws.column_dimensions["L"].width = 18
+    ws.column_dimensions["M"].width = 14
+    ws.column_dimensions["N"].width = 40
 
     buffer = BytesIO()
     wb.save(buffer)
@@ -1140,7 +1154,9 @@ def serialize_video_record(record: VideoRecord) -> dict:
         "fps": record.fps,
         "duration": record.duration,
         "total_persons": record.total_persons,
-        "total_count": record.total_persons,
+        "total_count": record.unique_count or record.total_persons,
+        "unique_count": record.unique_count,
+        "sum_count": record.sum_count,
         "avg_confidence": record.avg_confidence,
         "video_width": record.video_width,
         "video_height": record.video_height,
@@ -1277,6 +1293,11 @@ def video_progress(video_id):
             progress["current_frame"] = 0
             progress["total_frames"] = record.total_frames or 0
             progress["message"] = "等待处理队列..."
+        elif record.status == "completed":
+            progress["total_persons"] = record.total_persons or 0
+            progress["total_count"] = record.unique_count or record.total_persons or 0
+            progress["sum_count"] = record.sum_count or 0
+            progress["unique_count"] = record.unique_count or 0
         elif record.status == "failed" and not progress.get("message"):
             progress["message"] = record.error_message or "处理失败"
     return jsonify(progress)
@@ -1334,7 +1355,9 @@ def video_result_url(video_id):
         "current_person_count": first_frame_count,
         "current_count": first_frame_count,
         "total_persons": record.total_persons or 0,
-        "total_count": record.total_persons or 0,
+        "total_count": record.unique_count or record.total_persons or 0,
+        "unique_count": metadata.get("unique_count") or record.unique_count or 0,
+        "sum_count": metadata.get("sum_count") or record.sum_count or 0,
     })
 
 

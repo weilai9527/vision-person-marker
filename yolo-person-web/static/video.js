@@ -187,6 +187,9 @@ function setProgress(value, message) {
 
 function setStats(stats = {}) {
     currentPersons.textContent = stats.current_person_count || 0;
+    if (sumCount && (Object.keys(stats).length === 0 || "unique_count" in stats || "total_count" in stats)) {
+        sumCount.textContent = stats.unique_count || stats.total_count || 0;
+    }
 }
 
 function showStats() {
@@ -408,7 +411,7 @@ async function loadHistory() {
         <article class="video-record">
             <div>
                 <strong>${record.original_filename}</strong>
-                <p>${record.uploaded_at} · ${record.status} · ${record.processed_frames || 0}/${record.total_frames || 0} ${text.frame}</p>
+                <p>${record.uploaded_at} · ${record.status} · ${record.processed_frames || 0}/${record.total_frames || 0} ${text.frame}${record.total_count ? ` · 总数${record.total_count}` : ""}</p>
             </div>
             <div class="record-actions">
                 ${record.has_result ? `<button class="button-secondary" type="button" data-preview-video="${record.id}">${text.preview}</button>` : ""}
@@ -442,6 +445,10 @@ async function pollProgress(recordId) {
     const response = await fetch(endpoints.progress(recordId));
     const progress = await response.json();
     setProgress(progress.progress || 0, progress.message || progress.status);
+    setStats(progress);
+    if (progress.status === "processing" && Number(progress.current_frame || 0) > 0) {
+        showStats();
+    }
     if (progress.status === "completed") {
         clearInterval(progressTimer);
         submitButton.disabled = false;

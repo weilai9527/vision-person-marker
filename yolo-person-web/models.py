@@ -50,6 +50,8 @@ class VideoRecord(db.Model):
     fps = db.Column(db.Float, default=0.0)
     duration = db.Column(db.Float, default=0.0)
     total_persons = db.Column(db.Integer, default=0)
+    unique_count = db.Column(db.Integer, default=0)
+    sum_count = db.Column(db.Integer, default=0)
     avg_confidence = db.Column(db.Float, default=0.0)
     video_width = db.Column(db.Integer, default=0)
     video_height = db.Column(db.Integer, default=0)
