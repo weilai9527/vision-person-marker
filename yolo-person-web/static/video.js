@@ -10,11 +10,15 @@ const videoResult = document.getElementById("videoResult");
 const historyList = document.getElementById("videoHistoryList");
 const refreshButton = document.getElementById("refreshVideoHistory");
 const dropzone = document.getElementById("videoDropzone");
-const uploadVideoPreview = document.getElementById("uploadVideoPreview");
-const uploadPreviewVideo = document.getElementById("uploadPreviewVideo");
-const uploadPreviewCaption = document.getElementById("uploadPreviewCaption");
 const videoStats = document.getElementById("videoStats");
 const currentPersons = document.getElementById("currentPersons");
+const sumCount = document.getElementById("sumCount");
+const originalVideoPlayer = document.getElementById("originalVideoPlayer");
+const processedVideoPlayer = document.getElementById("processedVideoPlayer");
+const originalPlaceholder = document.getElementById("originalPlaceholder");
+const processedPlaceholder = document.getElementById("processedPlaceholder");
+const originalVideoContainer = document.getElementById("originalVideoContainer");
+const processedVideoContainer = document.getElementById("processedVideoContainer");
 const pageConfig = document.body.dataset || {};
 const apiBase = pageConfig.videoApiBase || "/api/video";
 const sharedApiBase = pageConfig.sharedVideoApiBase || "/api/video";
@@ -25,7 +29,7 @@ let progressTimer = null;
 let previewTimer = null;
 let previewToken = 0;
 let previewFrameObjectUrl = null;
-let uploadPreviewObjectUrl = null;
+let originalVideoObjectUrl = null;
 
 const text = {
     noVideo: "\u8fd8\u6ca1\u6709\u9009\u62e9\u89c6\u9891",
@@ -52,7 +56,6 @@ const text = {
     maxSize: "\u6700\u5927 500MB",
     unsupportedType: "\u683c\u5f0f\u4e0d\u652f\u6301\uff0c\u8bf7\u9009\u62e9 MP4\u3001AVI\u3001MOV\u3001MKV\u3001WEBM \u6216 FLV",
     tooLarge: "\u6587\u4ef6\u8fc7\u5927\uff0c\u4e0d\u80fd\u8d85\u8fc7 500MB",
-    uploadPreview: "\u4e0a\u4f20\u9884\u89c8",
 };
 
 const endpoints = {
@@ -90,28 +93,49 @@ function isAllowedVideo(file) {
     return allowedVideoExtensions.some((extension) => lowerName.endsWith(extension));
 }
 
-function clearUploadPreview() {
-    uploadPreviewVideo.pause();
-    uploadPreviewVideo.removeAttribute("src");
-    uploadPreviewCaption.textContent = "";
-    uploadVideoPreview.hidden = true;
-    dropzone.classList.remove("has-preview");
-    if (uploadPreviewObjectUrl) {
-        URL.revokeObjectURL(uploadPreviewObjectUrl);
-        uploadPreviewObjectUrl = null;
+function clearOriginalVideo() {
+    if (originalVideoPlayer) {
+        originalVideoPlayer.pause();
+        originalVideoPlayer.removeAttribute("src");
+        originalVideoPlayer.load();
     }
+    if (originalPlaceholder) {
+        originalPlaceholder.style.display = "";
+    }
+    if (originalVideoObjectUrl) {
+        URL.revokeObjectURL(originalVideoObjectUrl);
+        originalVideoObjectUrl = null;
+    }
+}
+
+function clearProcessedVideo() {
+    stopPreviewPlayback();
+    if (processedPlaceholder) {
+        processedPlaceholder.style.display = "";
+    }
+    const buttons = processedVideoContainer && processedVideoContainer.querySelectorAll(".processed-control-btn");
+    if (buttons) {
+        buttons.forEach((btn) => btn.remove());
+    }
+}
+
+function clearUploadPreview() {
 }
 
 function renderUploadPreview(file) {
     clearUploadPreview();
+    clearOriginalVideo();
+    clearProcessedVideo();
     if (!file) {
         return;
     }
-    uploadPreviewObjectUrl = URL.createObjectURL(file);
-    uploadPreviewVideo.src = uploadPreviewObjectUrl;
-    uploadPreviewCaption.textContent = `${text.uploadPreview}: ${file.name}`;
-    uploadVideoPreview.hidden = false;
-    dropzone.classList.add("has-preview");
+
+    if (originalVideoPlayer && originalPlaceholder) {
+        originalPlaceholder.style.display = "none";
+        originalVideoObjectUrl = URL.createObjectURL(file);
+        originalVideoPlayer.src = originalVideoObjectUrl;
+        originalVideoPlayer.load();
+    }
 }
 
 function validateVideoFile(file) {
@@ -137,6 +161,8 @@ function setFileState(file, errorMessage = "") {
         fileMeta.textContent = text.maxSize;
         submitButton.disabled = true;
         clearUploadPreview();
+        clearOriginalVideo();
+        clearProcessedVideo();
         return;
     }
 
@@ -145,6 +171,8 @@ function setFileState(file, errorMessage = "") {
     submitButton.disabled = Boolean(errorMessage);
     if (errorMessage) {
         clearUploadPreview();
+        clearOriginalVideo();
+        clearProcessedVideo();
     } else {
         renderUploadPreview(file);
     }
@@ -294,28 +322,31 @@ function startFramePreview(frameUrl, previewImage, playButton) {
 
 function renderPlayer(result, recordId) {
     stopPreviewPlayback();
+    clearProcessedVideo();
     setStats(result);
     showStats();
-    videoResult.innerHTML = `
-        <section class="preview-player fullscreen-preview" title="双击全屏">
-            <h3>${text.annotationVideo}</h3>
-            <img id="streamPreviewImage" class="stream-preview" alt="${text.previewAlt}">
-        </section>
-        <div class="record-actions">
-            <button class="button-secondary" type="button" id="previewPlayButton">${text.pause}</button>
-            <a class="button-secondary" href="${endpoints.download(recordId)}">${text.download}</a>
-        </div>
-    `;
 
-    const playerPanel = videoResult.querySelector(".preview-player");
-    const streamImage = document.getElementById("streamPreviewImage");
-    const playButton = document.getElementById("previewPlayButton");
+    if (processedPlaceholder) {
+        processedPlaceholder.style.display = "none";
+    }
 
-    playerPanel.addEventListener("dblclick", (event) => {
-        event.preventDefault();
-        toggleFullscreen(playerPanel);
-    });
-    startFramePreview(result.frame_url || result.stream_url, streamImage, playButton);
+    const playButton = document.createElement("button");
+    playButton.className = "button-secondary processed-control-btn";
+    playButton.textContent = text.pause;
+    playButton.style.cssText = "position:absolute;bottom:12px;right:12px;z-index:10;";
+
+    const downloadLink = document.createElement("a");
+    downloadLink.className = "button-secondary processed-control-btn";
+    downloadLink.href = endpoints.download(recordId);
+    downloadLink.textContent = text.download;
+    downloadLink.style.cssText = "position:absolute;bottom:12px;left:12px;z-index:10;";
+
+    if (processedVideoContainer) {
+        processedVideoContainer.appendChild(playButton);
+        processedVideoContainer.appendChild(downloadLink);
+    }
+
+    startFramePreview(result.frame_url || result.stream_url, processedVideoPlayer, playButton);
     setProgress(100, result.filename ? `${text.streamPreview}: ${result.filename}` : text.usingStream);
     videoResult.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -335,10 +366,6 @@ function bindDropzone() {
         const file = input.files[0];
         setFileState(file, validateVideoFile(file));
     });
-
-    uploadPreviewVideo.addEventListener("click", (event) => event.stopPropagation());
-    uploadPreviewVideo.addEventListener("mousedown", (event) => event.stopPropagation());
-    uploadPreviewVideo.addEventListener("touchstart", (event) => event.stopPropagation());
 
     ["dragenter", "dragover"].forEach((eventName) => {
         dropzone.addEventListener(eventName, (event) => {
@@ -403,6 +430,7 @@ async function loadHistory() {
             await fetch(endpoints.delete(button.dataset.deleteVideo), { method: "DELETE" });
             stopPreviewPlayback();
             hideStats();
+            clearProcessedVideo();
             videoResult.innerHTML = "";
             setProgress(0, text.waiting);
             loadHistory();
@@ -438,6 +466,7 @@ form.addEventListener("submit", async (event) => {
     submitButton.disabled = true;
     stopPreviewPlayback();
     hideStats();
+    clearProcessedVideo();
     videoResult.innerHTML = "";
     setProgress(0, text.uploading);
 

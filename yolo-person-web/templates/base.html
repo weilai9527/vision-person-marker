@@ -96,25 +96,47 @@
                         </span>
                         <span class="nav-label">摄像头</span>
                     </a>
-                    <a href="{{ url_for('history') }}" class="nav-item {% if request.endpoint == 'history' %}active{% endif %}" data-tip="历史记录">
-                        <span class="nav-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="10"/>
-                                <polyline points="12 6 12 12 16 14"/>
+                    <div class="nav-group">
+                        <button class="nav-item nav-toggle" type="button" data-target="historySub" aria-expanded="false">
+                            <span class="nav-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <polyline points="12 6 12 12 16 14"/>
+                                </svg>
+                            </span>
+                            <span class="nav-label">历史记录</span>
+                            <svg class="nav-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="9 18 15 12 9 6"/>
                             </svg>
-                        </span>
-                        <span class="nav-label">历史记录</span>
-                    </a>
-                    <a href="{{ url_for('data_export') }}" class="nav-item {% if request.endpoint == 'data_export' %}active{% endif %}" data-tip="数据导出">
-                        <span class="nav-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
+                        </button>
+                        <div class="nav-submenu" id="historySub">
+                            <a href="{{ url_for('history_image_pedestrian') }}" class="nav-sub-item {% if request.endpoint == 'history_image_pedestrian' %}active{% endif %}">图片-行人检测历史</a>
+                            <a href="{{ url_for('history_image_vehicle') }}" class="nav-sub-item {% if request.endpoint == 'history_image_vehicle' %}active{% endif %}">图片-车辆检测历史</a>
+                            <a href="{{ url_for('history_video_pedestrian') }}" class="nav-sub-item {% if request.endpoint == 'history_video_pedestrian' %}active{% endif %}">视频-行人检测历史</a>
+                            <a href="{{ url_for('history_video_vehicle') }}" class="nav-sub-item {% if request.endpoint == 'history_video_vehicle' %}active{% endif %}">视频-车辆检测历史</a>
+                        </div>
+                    </div>
+                    <div class="nav-group">
+                        <button class="nav-item nav-toggle" type="button" data-target="dataExportSub" aria-expanded="false">
+                            <span class="nav-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                            </span>
+                            <span class="nav-label">数据导出</span>
+                            <svg class="nav-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="9 18 15 12 9 6"/>
                             </svg>
-                        </span>
-                        <span class="nav-label">数据导出</span>
-                    </a>
+                        </button>
+                        <div class="nav-submenu" id="dataExportSub">
+                            <a href="{{ url_for('export_image_pedestrian') }}" class="nav-sub-item {% if request.endpoint == 'export_image_pedestrian' %}active{% endif %}">图片-行人检测导出</a>
+                            <a href="{{ url_for('export_image_vehicle') }}" class="nav-sub-item {% if request.endpoint == 'export_image_vehicle' %}active{% endif %}">图片-车辆检测导出</a>
+                            <a href="{{ url_for('export_video_pedestrian') }}" class="nav-sub-item {% if request.endpoint == 'export_video_pedestrian' %}active{% endif %}">视频-行人检测导出</a>
+                            <a href="{{ url_for('export_video_vehicle') }}" class="nav-sub-item {% if request.endpoint == 'export_video_vehicle' %}active{% endif %}">视频-车辆检测导出</a>
+                        </div>
+                    </div>
                 </div>
             </nav>
             <div class="sidebar-footer">

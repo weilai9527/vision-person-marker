@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ type_label }} - YOLO 智能检测仪表盘{% endblock %}
+{% block page_title %}{{ type_label }}{% endblock %}
+{% block breadcrumb %}数据管理 / 历史记录 / {{ type_label }}{% endblock %}
+
+{% block content %}
+<div class="history-page" id="historyPage" data-type="video_pedestrian">
+    <div class="history-header">
+        <div class="history-header-info">
+            <h1 class="history-title">视频行人检测历史</h1>
+            <p class="history-desc">查看和管理所有上传视频的行人检测记录，支持多维筛选、批量操作和详情查看。</p>
+        </div>
+        <div class="history-header-stats">
+            <div class="stat-badge">
+                <span class="stat-badge-label">总记录数</span>
+                <span class="stat-badge-value" id="totalCount">-</span>
+            </div>
+            <div class="stat-badge">
+                <span class="stat-badge-label">当前页</span>
+                <span class="stat-badge-value" id="currentPage">-</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="history-toolbar">
+        <div class="toolbar-left">
+            <div class="search-box">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" class="search-input" id="keywordInput" placeholder="搜索文件名..." />
+            </div>
+            <div class="filter-group">
+                <input type="date" class="form-input filter-input" id="startDateFilter" title="开始日期" />
+                <span class="filter-sep">至</span>
+                <input type="date" class="form-input filter-input" id="endDateFilter" title="结束日期" />
+            </div>
+            <select class="form-input filter-select" id="statusFilter">
+                <option value="all">全部状态</option>
+                <option value="completed">已完成</option>
+                <option value="processing">处理中</option>
+                <option value="pending">等待中</option>
+                <option value="failed">失败</option>
+            </select>
+        </div>
+        <div class="toolbar-right">
+            <button type="button" class="btn-ghost" id="refreshBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                刷新
+            </button>
+            <button type="button" class="btn-danger" id="batchDeleteBtn" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                删除选中
+            </button>
+        </div>
+    </div>
+
+    <div class="history-table-container">
+        <table class="data-table" id="historyTable">
+            <thead>
+                <tr>
+                    <th class="col-check"><input type="checkbox" id="selectAllCheck" /></th>
+                    <th class="col-id">ID</th>
+                    <th class="col-filename">文件名</th>
+                    <th class="col-date">上传时间</th>
+                    <th class="col-status">状态</th>
+                    <th class="col-frames">帧数</th>
+                    <th class="col-count">最大人数</th>
+                    <th class="col-actions">操作</th>
+                </tr>
+            </thead>
+            <tbody id="historyBody">
+                <tr><td colspan="8" class="empty-cell">正在加载...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="history-footer">
+        <div class="pagination-info" id="paginationInfo"></div>
+        <div class="pagination-controls" id="paginationControls"></div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="detailModal" hidden>
+    <div class="modal-content modal-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">处理详情</h3>
+            <button type="button" class="modal-close" id="detailModalClose">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="modal-body" id="detailModalBody">
+            <div class="detail-loading">加载中...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='history.js') }}"></script>
+<script>
+    HistoryPage.init({
+        type: "video_pedestrian",
+        typeLabel: "{{ type_label }}",
+        detectionLabel: "{{ detection_label }}",
+        mediaLabel: "{{ media_label }}",
+        isImage: false,
+    });
+</script>
+{% endblock %}
