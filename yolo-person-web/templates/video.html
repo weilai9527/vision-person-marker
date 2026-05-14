@@ -5,6 +5,45 @@
 
 {% block content %}
 <section class="workspace">
+    <div class="video-preview-section" id="videoPreviewSection">
+        <div class="video-preview-panel video-preview-original">
+            <div class="video-preview-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="video-preview-icon">
+                    <polygon points="23 7 16 12 23 17 23 7"/>
+                    <rect x="1" y="5" width="15" height="14" rx="2"/>
+                </svg>
+                <span class="video-preview-label">原始视频</span>
+            </div>
+            <div class="video-preview-body" id="originalVideoContainer">
+                <video id="originalVideoPlayer" class="video-player" preload="metadata" controls playsinline></video>
+                <div class="video-preview-placeholder" id="originalPlaceholder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7"/>
+                        <rect x="1" y="5" width="15" height="14" rx="2"/>
+                    </svg>
+                    <p>等待上传视频</p>
+                </div>
+            </div>
+        </div>
+        <div class="video-preview-panel video-preview-processed">
+            <div class="video-preview-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="video-preview-icon">
+                    <path d="M15 10l4.55-2.27A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                </svg>
+                <span class="video-preview-label">检测结果</span>
+            </div>
+            <div class="video-preview-body" id="processedVideoContainer">
+                <img id="processedVideoPlayer" class="video-player stream-preview" alt="检测结果预览">
+                <div class="video-preview-placeholder" id="processedPlaceholder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 10l4.55-2.27A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                    <p>等待检测结果</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="surface upload-surface">
         <div class="surface-header">
             <div>
@@ -19,10 +58,6 @@
                     <span class="upload-mark">+</span>
                     <strong>拖拽视频到这里</strong>
                     <span>也可以点击选择文件。</span>
-                </span>
-                <span class="upload-video-preview" id="uploadVideoPreview" hidden>
-                    <video id="uploadPreviewVideo" controls preload="metadata"></video>
-                    <span class="upload-preview-caption" id="uploadPreviewCaption"></span>
                 </span>
                 <input id="videoInput" type="file" name="video" accept=".mp4,.avi,.mov,.mkv,.webm,.flv" required>
             </label>

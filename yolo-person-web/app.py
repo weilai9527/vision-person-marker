@@ -45,6 +45,17 @@ from services.video_service import (
     get_video_count_metadata_path,
     load_video_count_metadata,
 )
+from services.export_service import (
+    EXPORT_FORMATS, IMAGE_FIELD_MAP, VIDEO_FIELD_MAP,
+    create_export_task, run_export_task, get_task,
+    get_export_history,
+)
+from services.history_service import (
+    query_image_records, query_video_records,
+    serialize_image_record, serialize_video_record,
+    delete_image_record, batch_delete_image_records,
+    delete_video_record, batch_delete_video_records,
+)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = max(16 * 1024 * 1024, VIDEO_MAX_SIZE * 1024 * 1024)
@@ -452,9 +463,89 @@ def history():
     return render_template("history.html", pagination=pagination, records=pagination.items)
 
 
+@app.route("/history/image/pedestrian")
+def history_image_pedestrian():
+    return render_template("history_image_pedestrian.html",
+                           history_type="image_pedestrian",
+                           type_label="图片行人检测历史",
+                           detection_label="行人",
+                           media_label="图片")
+
+
+@app.route("/history/image/vehicle")
+def history_image_vehicle():
+    return render_template("history_image_vehicle.html",
+                           history_type="image_vehicle",
+                           type_label="图片车辆检测历史",
+                           detection_label="车辆",
+                           media_label="图片")
+
+
+@app.route("/history/video/pedestrian")
+def history_video_pedestrian():
+    return render_template("history_video_pedestrian.html",
+                           history_type="video_pedestrian",
+                           type_label="视频行人检测历史",
+                           detection_label="行人",
+                           media_label="视频")
+
+
+@app.route("/history/video/vehicle")
+def history_video_vehicle():
+    return render_template("history_video_vehicle.html",
+                           history_type="video_vehicle",
+                           type_label="视频车辆检测历史",
+                           detection_label="车辆",
+                           media_label="视频")
+
+
 @app.route("/data-export")
 def data_export():
     return render_template("data_export.html")
+
+
+@app.route("/export/image/pedestrian")
+def export_image_pedestrian():
+    return render_template("export_image_pedestrian.html",
+                           export_formats=EXPORT_FORMATS,
+                           field_map=IMAGE_FIELD_MAP,
+                           export_type="image_pedestrian",
+                           export_type_label="图片行人检测数据导出",
+                           detection_label="行人",
+                           media_label="图片")
+
+
+@app.route("/export/image/vehicle")
+def export_image_vehicle():
+    return render_template("export_image_vehicle.html",
+                           export_formats=EXPORT_FORMATS,
+                           field_map=IMAGE_FIELD_MAP,
+                           export_type="image_vehicle",
+                           export_type_label="图片车辆检测数据导出",
+                           detection_label="车辆",
+                           media_label="图片")
+
+
+@app.route("/export/video/pedestrian")
+def export_video_pedestrian():
+    return render_template("export_video_pedestrian.html",
+                           export_formats=EXPORT_FORMATS,
+                           field_map=VIDEO_FIELD_MAP,
+                           export_type="video_pedestrian",
+                           export_type_label="视频行人检测数据导出",
+                           detection_label="行人",
+                           media_label="视频")
+
+
+@app.route("/export/video/vehicle")
+def export_video_vehicle():
+    return render_template("export_video_vehicle.html",
+                           export_formats=EXPORT_FORMATS,
+                           field_map=VIDEO_FIELD_MAP,
+                           export_type="video_vehicle",
+                           export_type_label="视频车辆检测数据导出",
+                           detection_label="车辆",
+                           media_label="视频")
 
 
 @app.route("/camera")
@@ -1390,6 +1481,205 @@ def delete_video_record(video_id):
         db.session.rollback()
         logger.exception(f"Failed to delete video record {video_id}")
         return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route("/api/history/image/records")
+def api_history_image_records():
+    history_type = request.args.get("type", "all")
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 20, type=int)
+    per_page = min(per_page, 50)
+    sort_by = request.args.get("sort_by", "uploaded_at")
+    sort_order = request.args.get("sort_order", "desc")
+    keyword = request.args.get("keyword", "")
+    start_date = request.args.get("start_date", "")
+    end_date = request.args.get("end_date", "")
+    api_provider = request.args.get("api_provider", "")
+
+    result = query_image_records(
+        history_type=history_type,
+        page=page,
+        per_page=per_page,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        keyword=keyword,
+        start_date=start_date,
+        end_date=end_date,
+        api_provider=api_provider,
+    )
+    return jsonify({"success": True, **result})
+
+
+@app.route("/api/history/video/records")
+def api_history_video_records():
+    detection_target = request.args.get("target", "person")
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 20, type=int)
+    per_page = min(per_page, 50)
+    sort_by = request.args.get("sort_by", "uploaded_at")
+    sort_order = request.args.get("sort_order", "desc")
+    keyword = request.args.get("keyword", "")
+    start_date = request.args.get("start_date", "")
+    end_date = request.args.get("end_date", "")
+    status_filter = request.args.get("status", "")
+
+    result = query_video_records(
+        detection_target=detection_target,
+        page=page,
+        per_page=per_page,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        keyword=keyword,
+        start_date=start_date,
+        end_date=end_date,
+        status_filter=status_filter,
+    )
+    return jsonify({"success": True, **result})
+
+
+@app.route("/api/history/image/detail/<int:record_id>")
+def api_history_image_detail(record_id):
+    record = db.session.get(ImageRecord, record_id)
+    if not record:
+        return jsonify({"success": False, "error": "记录不存在"}), 404
+    return jsonify({"success": True, "record": serialize_image_record(record)})
+
+
+@app.route("/api/history/video/detail/<int:record_id>")
+def api_history_video_detail(record_id):
+    record = db.session.get(VideoRecord, record_id)
+    if not record:
+        return jsonify({"success": False, "error": "记录不存在"}), 404
+    return jsonify({"success": True, "record": serialize_video_record(record)})
+
+
+@app.route("/api/history/image/batch-delete", methods=["POST"])
+def api_history_image_batch_delete():
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids", [])
+    if not ids:
+        return jsonify({"success": False, "error": "未提供记录ID"}), 400
+
+    deleted, errors = batch_delete_image_records(ids)
+    return jsonify({
+        "success": True,
+        "deleted": deleted,
+        "errors": errors,
+        "message": f"成功删除 {deleted} 条记录",
+    })
+
+
+@app.route("/api/history/video/batch-delete", methods=["POST"])
+def api_history_video_batch_delete():
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids", [])
+    if not ids:
+        return jsonify({"success": False, "error": "未提供记录ID"}), 400
+
+    deleted, errors = batch_delete_video_records(ids)
+    return jsonify({
+        "success": True,
+        "deleted": deleted,
+        "errors": errors,
+        "message": f"成功删除 {deleted} 条记录",
+    })
+
+
+@app.route("/api/export/start", methods=["POST"])
+def api_export_start():
+    data = request.get_json(silent=True) or {}
+    export_type = data.get("type", "")
+    params = {
+        "format": data.get("format", "xlsx"),
+        "fields": data.get("fields", []),
+        "start_date": data.get("start_date", ""),
+        "end_date": data.get("end_date", ""),
+    }
+
+    if export_type not in ("image_pedestrian", "image_vehicle", "video_pedestrian", "video_vehicle"):
+        return jsonify({"success": False, "error": "无效的导出类型"}), 400
+
+    task_id = create_export_task(export_type, params)
+
+    thread = threading.Thread(target=run_export_task, args=(task_id, app), daemon=True)
+    thread.start()
+
+    return jsonify({"success": True, "task_id": task_id, "message": "导出任务已创建"})
+
+
+@app.route("/api/export/progress/<task_id>")
+def api_export_progress(task_id):
+    task = get_task(task_id)
+    if not task:
+        return jsonify({"success": False, "error": "任务不存在"}), 404
+
+    return jsonify({
+        "success": True,
+        "task": {
+            "id": task["id"],
+            "type": task["type"],
+            "status": task["status"],
+            "progress": task["progress"],
+            "message": task["message"],
+            "total_records": task["total_records"],
+            "exported_records": task["exported_records"],
+            "file_size": task["file_size"],
+            "file_name": task["file_name"],
+            "created_at": task["created_at"].strftime("%Y-%m-%d %H:%M:%S") if task["created_at"] else "",
+            "completed_at": task["completed_at"].strftime("%Y-%m-%d %H:%M:%S") if task["completed_at"] else "",
+            "error": task["error"],
+        }
+    })
+
+
+@app.route("/api/export/download/<task_id>")
+def api_export_download(task_id):
+    task = get_task(task_id)
+    if not task:
+        return jsonify({"success": False, "error": "任务不存在"}), 404
+    if task["status"] != "completed":
+        return jsonify({"success": False, "error": "任务尚未完成"}), 400
+
+    buffer = task.get("file_path")
+    if not buffer:
+        return jsonify({"success": False, "error": "导出文件不存在"}), 404
+
+    format_map = {
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "csv": "text/csv",
+        "json": "application/json",
+    }
+    file_format = task["params"].get("format", "xlsx")
+    mimetype = format_map.get(file_format, "application/octet-stream")
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=task["file_name"],
+        mimetype=mimetype,
+    )
+
+
+@app.route("/api/export/history")
+def api_export_history():
+    history = get_export_history(20)
+    return jsonify({
+        "success": True,
+        "history": [{
+            "id": t["id"],
+            "type": t["type"],
+            "status": t["status"],
+            "progress": t["progress"],
+            "message": t["message"],
+            "total_records": t["total_records"],
+            "exported_records": t["exported_records"],
+            "file_name": t["file_name"],
+            "file_size": t["file_size"],
+            "created_at": t["created_at"].strftime("%Y-%m-%d %H:%M:%S") if t["created_at"] else "",
+            "completed_at": t["completed_at"].strftime("%Y-%m-%d %H:%M:%S") if t["completed_at"] else "",
+            "error": t["error"],
+        } for t in history]
+    })
 
 
 if __name__ == "__main__":
