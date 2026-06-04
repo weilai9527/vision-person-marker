@@ -9,8 +9,8 @@
     --sidebar-active: rgba(15, 118, 110, 0.20);
     --sidebar-text: #9ca3af;
     --sidebar-text-active: #ffffff;
-    --sidebar-width: 260px;
-    --sidebar-collapsed-width: 68px;
+    --sidebar-width: 220px;
+    --sidebar-collapsed-width: 60px;
 
     --topbar-bg: #ffffff;
     --topbar-border: #e5e7eb;
@@ -73,6 +73,7 @@ img { max-width: 100%; display: block; }
 .dashboard {
     display: flex;
     min-height: 100vh;
+    overflow-x: hidden;
 }
 
 /* ===== Sidebar ===== */
@@ -97,7 +98,7 @@ img { max-width: 100%; display: block; }
 .sidebar-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     padding: 16px 16px 12px;
     min-height: 64px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -153,31 +154,6 @@ img { max-width: 100%; display: block; }
     color: var(--sidebar-text);
     font-size: 11px;
     white-space: nowrap;
-}
-
-.sidebar-toggle {
-    width: 28px;
-    height: 28px;
-    flex: 0 0 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    background: transparent;
-    color: var(--sidebar-text);
-    border-radius: 6px;
-    padding: 5px;
-    transition: background var(--transition), color var(--transition);
-}
-
-.sidebar-toggle:hover {
-    background: var(--sidebar-hover);
-    color: #ffffff;
-}
-
-.sidebar-toggle svg {
-    width: 100%;
-    height: 100%;
 }
 
 .sidebar-nav {
@@ -328,6 +304,7 @@ img { max-width: 100%; display: block; }
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    overflow-x: hidden;
     transition: margin-left var(--transition);
 }
 
@@ -358,16 +335,16 @@ img { max-width: 100%; display: block; }
 }
 
 .topbar-menu-btn {
-    display: none;
-    width: 36px;
-    height: 36px;
+    display: flex;
+    width: 38px;
+    height: 38px;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--border);
+    border: none;
     border-radius: var(--radius);
-    background: var(--surface);
+    background: transparent;
     color: var(--text-secondary);
-    padding: 8px;
+    padding: 9px;
     transition: all var(--transition);
 }
 
@@ -1675,8 +1652,7 @@ form { display: grid; gap: 14px; }
         margin-left: 0 !important;
     }
 
-    .topbar-menu-btn { display: flex; }
-    .sidebar-toggle { display: none; }
+    .topbar-menu-btn { display: flex; width: 36px; height: 36px; padding: 8px; }
 
     .topbar {
         padding: 0 16px;
