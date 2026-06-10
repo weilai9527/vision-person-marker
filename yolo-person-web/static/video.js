@@ -1,4 +1,6 @@
 const form = document.getElementById("videoForm");
+const yoloModelSelect = document.getElementById("videoYoloModel");
+const currentYoloModelText = document.getElementById("videoCurrentYoloModel");
 const input = document.getElementById("videoInput");
 const fileName = document.getElementById("videoFileName");
 const fileMeta = document.getElementById("videoFileMeta");
@@ -182,7 +184,16 @@ function setProgress(value, message) {
     const percent = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
     progressFill.style.width = `${percent}%`;
     progressPercent.textContent = `${percent}%`;
+    if (progressPercent.closest(".progress-panel")) {
+        progressPercent.closest(".progress-panel").dataset.progress = `${percent}%`;
+    }
     progressText.textContent = message;
+}
+
+function syncCurrentYoloModel() {
+    if (yoloModelSelect && currentYoloModelText) {
+        currentYoloModelText.textContent = yoloModelSelect.value;
+    }
 }
 
 function setStats(stats = {}) {
@@ -479,6 +490,9 @@ form.addEventListener("submit", async (event) => {
 
     const formData = new FormData();
     formData.append("video", selectedFile);
+    if (yoloModelSelect) {
+        formData.append("yolo_model", yoloModelSelect.value);
+    }
     const response = await fetch(endpoints.upload, { method: "POST", body: formData });
     const data = await response.json();
     if (!data.success) {
@@ -492,5 +506,10 @@ form.addEventListener("submit", async (event) => {
 });
 
 refreshButton.addEventListener("click", loadHistory);
+if (yoloModelSelect) {
+    yoloModelSelect.addEventListener("change", syncCurrentYoloModel);
+}
 bindDropzone();
+syncCurrentYoloModel();
+setProgress(0, text.waiting);
 loadHistory();

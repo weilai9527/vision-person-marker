@@ -5,12 +5,13 @@ from pathlib import Path
 from uuid import uuid4
 
 import requests
+from PIL import ImageDraw
 
 from config import ENABLE_TILE_DETECTION, LLM_TIMEOUT, LOG_DIR
 from models import DetectionResult, db
 from services.detection_core import convert_boxes_to_model_coords, generate_tiles, limit_boxes, merge_boxes
 from services.image_service import pil_image_to_data_url, prepare_model_image_object, save_model_response_log
-from services.yolo_service import run_yolo_detection
+from services.yolo_service import VEHICLE_CLASS_IDS, run_yolo_detection
 
 
 def repair_json_text(text: str) -> str:
@@ -72,12 +73,35 @@ def extract_detection_from_text(text: str) -> dict | None:
     return {"person_count": count, "vehicle_count": count, "boxes": boxes, "analysis": "模型返回的 JSON 不完整，系统已尽量提取数量和坐标。"}
 
 
+def normalize_model_json_result(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        nested = value.strip()
+        if nested.startswith("```"):
+            nested = re.sub(r"^```(?:json)?\s*|\s*```$", "", nested, flags=re.IGNORECASE | re.DOTALL).strip()
+        if nested:
+            try:
+                parsed = json.loads(nested)
+            except json.JSONDecodeError:
+                return value
+            return normalize_model_json_result(parsed)
+    return value
+
+
 def parse_model_json(content: str) -> dict:
     cleaned = content.strip()
     if not cleaned:
         raise ValueError("模型返回内容为空，无法解析 JSON。")
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+
+    try:
+        parsed = normalize_model_json_result(json.loads(cleaned))
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
 
     match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
     if match:
@@ -86,7 +110,10 @@ def parse_model_json(content: str) -> dict:
     last_error = None
     for candidate in (cleaned, repair_json_text(cleaned)):
         try:
-            return json.loads(candidate)
+            parsed = normalize_model_json_result(json.loads(candidate))
+            if isinstance(parsed, dict):
+                return parsed
+            last_error = ValueError(f"JSON 顶层不是对象：{type(parsed).__name__}")
         except json.JSONDecodeError as exc:
             last_error = exc
 
@@ -122,70 +149,11 @@ def build_detection_prompt(width: int, height: int, scope: str = "整张图片")
         f'{{"x1":100,"y1":200,"x2":300}}  ← 缺少 y2 键名，不是合法 JSON\n'
     )
 
-
-def build_yolo_judge_prompt(width: int, height: int, yolo_boxes: list[dict]) -> str:
-    candidates = [
-        {
-            "id": index,
-            "x1": box.get("x1"),
-            "y1": box.get("y1"),
-            "x2": box.get("x2"),
-            "y2": box.get("y2"),
-            "conf": box.get("conf"),
-        }
-        for index, box in enumerate(yolo_boxes, start=1)
-    ]
-    return (
-        "你是 YOLO 人员检测流程的行为裁判，不要替代 YOLO 做检测，不要重新输出人物框。"
-        f"图片尺寸为 {width}x{height} 像素。"
-        f"YOLO 候选框如下：{json.dumps(candidates, ensure_ascii=False, separators=(',', ':'))}。"
-        "请观察原图，只给 YOLO 后处理建议。"
-        "只统计真实可见的人，不统计照片、海报、雕像或屏幕里的人。"
-        "action 只能是 keep_yolo、filter_false_positive、rerun_low_conf、rerun_high_conf、rerun_high_res。"
-        "如果明显漏检，选 rerun_low_conf；如果小目标密集，选 rerun_high_res；如果明显误检多，选 rerun_high_conf；如果只有少数明确误检，选 filter_false_positive。"
-        "false_positive_ids 只填写明显不是人的 YOLO 框编号，不确定就留空。"
-        "missed_hint 只写是否疑似漏检，用短中文描述，不要给坐标。"
-        "analysis 必须少于 30 个汉字。最终人数和画框由 YOLO 决定。"
-        "必须只返回一行紧凑 JSON，不要 Markdown，不要解释，不要尾逗号。格式为："
-        '{"action":"keep_yolo","false_positive_ids":[],"missed_hint":"","analysis":"简述"}'
-    )
-
-
-def build_vehicle_judge_prompt(width: int, height: int, yolo_boxes: list[dict]) -> str:
-    candidates = [
-        {
-            "id": index,
-            "x1": box.get("x1"),
-            "y1": box.get("y1"),
-            "x2": box.get("x2"),
-            "y2": box.get("y2"),
-            "conf": box.get("conf"),
-        }
-        for index, box in enumerate(yolo_boxes, start=1)
-    ]
-    return (
-        "你是 YOLO 车辆检测流程的行为裁判，不要替代 YOLO 做检测，不要重新输出车辆框。"
-        f"图片尺寸为 {width}x{height} 像素。"
-        f"YOLO 候选框如下：{json.dumps(candidates, ensure_ascii=False, separators=(',', ':'))}。"
-        "请观察原图，只给 YOLO 后处理建议。"
-        "只统计真实可见的车辆，包括自行车、小汽车、摩托车、公交车、卡车。不统计照片、海报、模型或屏幕里的车辆。"
-        "action 只能是 keep_yolo、filter_false_positive、rerun_low_conf、rerun_high_conf、rerun_high_res。"
-        "如果明显漏检，选 rerun_low_conf；如果小目标密集，选 rerun_high_res；如果明显误检多，选 rerun_high_conf；如果只有少数明确误检，选 filter_false_positive。"
-        "false_positive_ids 只填写明显不是车辆的 YOLO 框编号（如阴影、广告牌、建筑物被误检为车），不确定就留空。"
-        "missed_hint 只写是否疑似漏检，用短中文描述，不要给坐标。"
-        "analysis 必须少于 30 个汉字。最终车辆数和画框由 YOLO 决定。"
-        "必须只返回一行紧凑 JSON，不要 Markdown，不要解释，不要换行，不要尾逗号。格式为："
-        '{"action":"keep_yolo","false_positive_ids":[],"missed_hint":"","analysis":"简述"}'
-    )
-
-
-def get_request_temperature(api_config: dict) -> int:
-    provider = (api_config.get("provider") or "").lower()
+def get_request_temperature(api_config: dict) -> float:
     api_url = (api_config.get("api_url") or "").lower()
-    model = (api_config.get("model") or "").lower()
-    if provider == "kimi" or "moonshot" in api_url or model.startswith("kimi-"):
-        return 1
-    return 0
+    if "moonshot" in api_url:
+        return 1.0
+    return 0.0
 
 
 def supports_response_format(api_config: dict) -> bool:
@@ -194,7 +162,46 @@ def supports_response_format(api_config: dict) -> bool:
         return True
     if "api.openai.com" in api_url:
         return True
+    if "dashscope" in api_url or "aliyuncs" in api_url:
+        return True
     return False
+
+
+def sanitize_message_content(content):
+    if not isinstance(content, list):
+        return content
+    sanitized = []
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "image_url":
+            sanitized.append({"type": "image_url", "image_url": {"url": "[base64 image omitted]"}})
+        else:
+            sanitized.append(item)
+    return sanitized
+
+
+def get_payload_text(payload: dict) -> str:
+    texts = []
+    for message in payload.get("messages", []):
+        content = message.get("content")
+        if isinstance(content, str):
+            texts.append(content)
+        elif isinstance(content, list):
+            texts.extend(str(item.get("text", "")) for item in content if isinstance(item, dict))
+    return "\n".join(texts)
+
+
+def is_yolo_judge_payload(payload: dict) -> bool:
+    text = get_payload_text(payload)
+    return '"action":"keep_yolo"' in text or "Allowed action values" in text
+
+
+def fallback_yolo_judgement(reason: str) -> dict:
+    return {
+        "action": "keep_yolo",
+        "false_positive_ids": [],
+        "missed_hint": "",
+        "analysis": reason[:30] or "keep_yolo",
+    }
 
 
 def save_failed_response_log(api_config: dict, payload: dict, response_data: dict | str, content: str) -> str:
@@ -211,10 +218,7 @@ def save_failed_response_log(api_config: dict, payload: dict, response_data: dic
             "messages": [
                 {
                     **message,
-                    "content": [
-                        item if item.get("type") != "image_url" else {"type": "image_url", "image_url": {"url": "[base64 image omitted]"}}
-                        for item in message.get("content", [])
-                    ],
+                    "content": sanitize_message_content(message.get("content", [])),
                 }
                 for message in payload.get("messages", [])
             ],
@@ -249,7 +253,20 @@ def post_vision_json(api_config: dict, payload: dict) -> tuple[dict, dict, str]:
         raise ValueError(f"接口请求失败：HTTP {response.status_code}，地址：{api_config['api_url']}，响应：{detail}") from exc
 
     data = response.json()
-    content = data.get("choices", [{}])[0].get("message", {}).get("content") or ""
+    choice = data.get("choices", [{}])[0]
+    message = choice.get("message", {})
+    content = message.get("content") or ""
+    if not content:
+        reasoning_content = message.get("reasoning_content") or ""
+        if reasoning_content:
+            try:
+                parsed = parse_model_json(reasoning_content)
+                return parsed, data, reasoning_content
+            except ValueError:
+                if is_yolo_judge_payload(payload):
+                    finish_reason = choice.get("finish_reason") or "empty_content"
+                    reason = f"LLM only returned reasoning({finish_reason}); kept YOLO"
+                    return fallback_yolo_judgement(reason), data, reason
     try:
         parsed = parse_model_json(content)
     except ValueError as exc:
@@ -259,10 +276,11 @@ def post_vision_json(api_config: dict, payload: dict) -> tuple[dict, dict, str]:
 
 
 SYSTEM_PROMPT = (
-    "你是一个严格遵循 JSON 格式规范的视觉检测助手。"
-    "你的唯一任务是检测图片中的目标并输出严格合法的 JSON。"
-    "任何格式错误（如省略键名、使用圆括号、缺少引号）都会导致结果无法使用。"
-    "你必须确保输出的 JSON 可以通过标准 JSON 解析器直接验证。"
+    "你是一个严格遵循 JSON 格式规范的视觉检测助手。\n"
+    "【最高指令】你的唯一任务是分析图片并输出严格合法的 JSON 对象。\n"
+    "【禁止事项】绝对不要输出任何 markdown 标记（如 ```json）、不要有任何问候语、不要有任何解释性文字。\n"
+    "任何格式错误（如省略键名、使用单引号、缺少闭合括号）都会导致系统崩溃。\n"
+    "请确保你的输出直接以 `{` 开始，并以 `}` 结束。"
 )
 
 
@@ -287,6 +305,29 @@ def build_payload(api_config: dict, prompt: str, image_url: str, max_tokens: int
     return payload
 
 
+def build_fast_judge_prompt(width: int, height: int, yolo_boxes: list[dict], target_label: str) -> str:
+    candidates = [
+        {
+            "id": index,
+            "conf": box.get("conf"),
+        }
+        for index, box in enumerate(yolo_boxes, start=1)
+    ]
+    return (
+        f"你是卓越的视觉目标检测复核专家。图片中已经用红色方框和数字标出了 YOLO 找到的候选目标。\n"
+        f"候选目标编号及置信度: {json.dumps(candidates, ensure_ascii=False, separators=(',', ':'))}。\n"
+        f"你的任务是**严格剔除误检**。请仔细甄别图片上的红色编号框，找出哪些编号框住的**不是**真实的{target_label}。\n"
+        f"【必须剔除的标准】请将符合以下任意情况的编号放入 false_positive_ids：\n"
+        f"1. 非真实目标：如海报/屏幕里的影像、雕像、假人、水中倒影等。\n"
+        f"2. 形状相似的杂物：如树木、电线杆、路障、消防栓、建筑物部件等。\n"
+        f"3. 无意义的色块：极其模糊或光影导致的低置信度错误框。\n"
+        "只要判定存在误检，请立即选择 action: filter_false_positive。\n"
+        "仅当所有红框全部都是真实目标时，才选择 action: keep_yolo。\n"
+        "【输出格式要求】必须只返回以下结构的 JSON 对象，不要 Markdown，不要解释：\n"
+        '{"action":"keep_yolo","false_positive_ids":[],"missed_hint":"","analysis":"OK"}'
+    )
+
+
 def request_detection(api_config: dict, image_url: str, width: int, height: int, scope: str) -> tuple[dict, dict]:
     payload = build_payload(api_config, build_detection_prompt(width, height, scope), image_url, 4096)
     parsed, data, content = post_vision_json(api_config, payload)
@@ -294,13 +335,13 @@ def request_detection(api_config: dict, image_url: str, width: int, height: int,
 
 
 def request_yolo_judgement(api_config: dict, image_url: str, width: int, height: int, yolo_boxes: list[dict]) -> tuple[dict, dict]:
-    payload = build_payload(api_config, build_yolo_judge_prompt(width, height, yolo_boxes), image_url, 1024)
+    payload = build_payload(api_config, build_fast_judge_prompt(width, height, yolo_boxes, "person"), image_url, 2048)
     parsed, data, content = post_vision_json(api_config, payload)
     return parsed, {"response": data, "content": content}
 
 
 def request_vehicle_judgement(api_config: dict, image_url: str, width: int, height: int, yolo_boxes: list[dict]) -> tuple[dict, dict]:
-    payload = build_payload(api_config, build_vehicle_judge_prompt(width, height, yolo_boxes), image_url, 1024)
+    payload = build_payload(api_config, build_fast_judge_prompt(width, height, yolo_boxes, "vehicle"), image_url, 2048)
     parsed, data, content = post_vision_json(api_config, payload)
     return parsed, {"response": data, "content": content}
 
@@ -348,16 +389,35 @@ def choose_yolo_action(action: str) -> tuple[str, dict, str]:
     return "keep_yolo", {}, "保留 YOLO"
 
 
-def call_yolo_judge_model(
+def choose_vehicle_yolo_action(action: str) -> tuple[str, dict, str]:
+    action = action if action in {"keep_yolo", "filter_false_positive", "rerun_low_conf", "rerun_high_conf", "rerun_high_res"} else "keep_yolo"
+    if action == "rerun_low_conf":
+        return action, {"conf": 0.10, "iou": 0.55, "imgsz": 1792, "min_area": 20}, "低阈值补漏"
+    if action == "rerun_high_conf":
+        return action, {"conf": 0.34, "iou": 0.42, "imgsz": 1536, "min_area": 45}, "高阈值去误检"
+    if action == "rerun_high_res":
+        return action, {"conf": 0.16, "iou": 0.55, "imgsz": 1792, "min_area": 20}, "高分辨率小目标"
+    if action == "filter_false_positive":
+        return action, {}, "剔除明确误检"
+    return "keep_yolo", {}, "保留 YOLO"
+
+
+def _run_yolo_judge_core(
     image_path: Path,
     image_record_id: int,
     api_config: dict,
-    draw_person_boxes,
+    draw_boxes,
     yolo_boxes: list[dict],
     yolo_width: int,
     yolo_height: int,
-    analysis_prefix: str = "",
+    analysis_prefix: str,
+    request_judgement_func,
+    run_yolo_kwargs: dict,
+    provider_default: str,
+    mode: str,
+    allow_reduced_boxes: bool = False,
 ) -> tuple[int, str, str, int, int]:
+    """YOLO Judge 流程的通用核心逻辑。"""
     if not api_config["api_key"]:
         raise ValueError("未配置 API Key，请先设置大模型 API Key。")
 
@@ -367,7 +427,17 @@ def call_yolo_judge_model(
     model_image_width, model_image_height = model_image.size
     judge_boxes = scale_boxes_for_model(yolo_boxes, yolo_width, yolo_height, model_image_width, model_image_height)
 
-    judgement, raw_log = request_yolo_judgement(
+    # 【核心优化：Visual Prompting 视觉提示】直接在图上画出带有 ID 的红框
+    draw = ImageDraw.Draw(model_image)
+    for index, box in enumerate(judge_boxes, start=1):
+        x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
+        draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
+        # 绘制显眼的红色底板与白色数字编号
+        draw.rectangle([x1, max(0, y1 - 20), x1 + 24, y1], fill="red")
+        draw.text((x1 + 4, max(0, y1 - 18)), str(index), fill="white")
+    model_image_url, jpeg_bytes = pil_image_to_data_url(model_image)
+
+    judgement, raw_log = request_judgement_func(
         api_config,
         model_image_url,
         model_image_width,
@@ -375,19 +445,24 @@ def call_yolo_judge_model(
         judge_boxes,
     )
     log_payload = {
-        "mode": "yolo_judge",
+        "mode": mode,
         "yolo_box_count": len(yolo_boxes),
         "judgement": raw_log,
     }
     log_path = Path(save_model_response_log(image_path, api_config, log_payload, raw_log["content"], model_image_info))
 
-    action, yolo_overrides, action_label = choose_yolo_action(str(judgement.get("action") or "keep_yolo"))
+    action_selector = choose_vehicle_yolo_action if mode == "vehicle_yolo_judge" else choose_yolo_action
+    action, yolo_overrides, action_label = action_selector(str(judgement.get("action") or "keep_yolo"))
     false_positive_ids = normalize_judgement_ids(judgement.get("false_positive_ids"), len(yolo_boxes))
 
     if yolo_overrides:
-        reran_boxes, reran_width, reran_height = run_yolo_detection(image_path, **yolo_overrides)
-        # 大模型不能剔除 YOLO 标注：rerun 后如果框变少了，回退到原框保证不减少
-        if len(reran_boxes) >= len(yolo_boxes):
+        reran_boxes, reran_width, reran_height = run_yolo_detection(
+            image_path,
+            **run_yolo_kwargs,
+            **yolo_overrides,
+        )
+        # 行人场景默认不减少框；车辆场景允许高阈值/高分辨率 rerun 修正明显误检。
+        if allow_reduced_boxes or len(reran_boxes) >= len(yolo_boxes):
             final_boxes, final_width, final_height = reran_boxes, reran_width, reran_height
             false_positive_ids = []
         else:
@@ -398,12 +473,14 @@ def call_yolo_judge_model(
         final_boxes = yolo_boxes
         final_width = yolo_width
         final_height = yolo_height
-        # 大模型不能剔除 YOLO 标注：禁用 filter_false_positive
-        if action == "filter_false_positive":
+        if allow_reduced_boxes and action == "filter_false_positive" and false_positive_ids:
+            final_boxes = [box for index, box in enumerate(yolo_boxes, start=1) if index not in false_positive_ids]
+        elif action == "filter_false_positive":
+            # 行人场景默认不允许大模型删除 YOLO 标注。
             action_label = f"{action_label}（已禁用，保留全部 {len(yolo_boxes)} 个框）"
-        false_positive_ids = []
+            false_positive_ids = []
 
-    result_name, drawn_count = draw_person_boxes(image_path, final_boxes, (final_width, final_height))
+    result_name, drawn_count = draw_boxes(image_path, final_boxes, (final_width, final_height))
 
     missed_hint = str(judgement.get("missed_hint") or "").strip()
     judge_analysis = str(judgement.get("analysis") or "大模型已复核 YOLO 结果。")
@@ -422,7 +499,7 @@ def call_yolo_judge_model(
         bounding_boxes_json=json.dumps(final_boxes, ensure_ascii=False),
         llm_analysis_text=analysis,
         result_image_path=f"static/results/{result_name}",
-        llm_api_provider=api_config.get("provider", "vision_model_judge"),
+        llm_api_provider=api_config.get("provider", provider_default),
         llm_model_name=api_config.get("model", ""),
         raw_llm_response_log_path=str(log_path),
     )
@@ -430,6 +507,32 @@ def call_yolo_judge_model(
     db.session.commit()
 
     return drawn_count, analysis, result_name, final_width, final_height
+
+
+def call_yolo_judge_model(
+    image_path: Path,
+    image_record_id: int,
+    api_config: dict,
+    draw_person_boxes,
+    yolo_boxes: list[dict],
+    yolo_width: int,
+    yolo_height: int,
+    analysis_prefix: str = "",
+) -> tuple[int, str, str, int, int]:
+    return _run_yolo_judge_core(
+        image_path,
+        image_record_id,
+        api_config,
+        draw_person_boxes,
+        yolo_boxes,
+        yolo_width,
+        yolo_height,
+        analysis_prefix,
+        request_yolo_judgement,
+        {},
+        "vision_model_judge",
+        "yolo_judge",
+    )
 
 
 def call_vehicle_yolo_judge_model(
@@ -442,92 +545,36 @@ def call_vehicle_yolo_judge_model(
     yolo_height: int,
     analysis_prefix: str = "",
 ) -> tuple[int, str, str, int, int]:
-    if not api_config["api_key"]:
-        raise ValueError("未配置 API Key，请先设置大模型 API Key。")
-
-    model_image, model_image_info = prepare_model_image_object(image_path)
-    model_image_url, jpeg_bytes = pil_image_to_data_url(model_image)
-    model_image_info = {**model_image_info, "jpeg_bytes": jpeg_bytes}
-    model_image_width, model_image_height = model_image.size
-    judge_boxes = scale_boxes_for_model(yolo_boxes, yolo_width, yolo_height, model_image_width, model_image_height)
-
-    judgement, raw_log = request_vehicle_judgement(
+    return _run_yolo_judge_core(
+        image_path,
+        image_record_id,
         api_config,
-        model_image_url,
-        model_image_width,
-        model_image_height,
-        judge_boxes,
+        draw_vehicle_boxes,
+        yolo_boxes,
+        yolo_width,
+        yolo_height,
+        analysis_prefix,
+        request_vehicle_judgement,
+        {"class_ids": VEHICLE_CLASS_IDS, "target_label": "vehicle"},
+        "vision_model_vehicle_judge",
+        "vehicle_yolo_judge",
+        allow_reduced_boxes=True,
     )
-    log_payload = {
-        "mode": "vehicle_yolo_judge",
-        "yolo_box_count": len(yolo_boxes),
-        "judgement": raw_log,
-    }
-    log_path = Path(save_model_response_log(image_path, api_config, log_payload, raw_log["content"], model_image_info))
-
-    action, yolo_overrides, action_label = choose_yolo_action(str(judgement.get("action") or "keep_yolo"))
-    false_positive_ids = normalize_judgement_ids(judgement.get("false_positive_ids"), len(yolo_boxes))
-
-    if yolo_overrides:
-        reran_boxes, reran_width, reran_height = run_yolo_detection(
-            image_path,
-            class_ids=VEHICLE_CLASS_IDS,
-            target_label="vehicle",
-            **yolo_overrides,
-        )
-        # 大模型不能剔除 YOLO 标注：rerun 后如果框变少了，回退到原框保证不减少
-        if len(reran_boxes) >= len(yolo_boxes):
-            final_boxes, final_width, final_height = reran_boxes, reran_width, reran_height
-            false_positive_ids = []
-        else:
-            final_boxes, final_width, final_height = yolo_boxes, yolo_width, yolo_height
-            false_positive_ids = []
-            action_label = f"{action_label}（ rerun 后框减少，已回退保留原框）"
-    else:
-        final_boxes = yolo_boxes
-        final_width = yolo_width
-        final_height = yolo_height
-        # 大模型不能剔除 YOLO 标注：禁用 filter_false_positive
-        if action == "filter_false_positive":
-            action_label = f"{action_label}（已禁用，保留全部 {len(yolo_boxes)} 个框）"
-        false_positive_ids = []
-
-    result_name, drawn_count = draw_vehicle_boxes(image_path, final_boxes, (final_width, final_height))
-
-    missed_hint = str(judgement.get("missed_hint") or "").strip()
-    judge_analysis = str(judgement.get("analysis") or "大模型已复核 YOLO 结果。")
-    analysis = (
-        f"{analysis_prefix}"
-        f"大模型只给 YOLO 后处理建议：{judge_analysis}"
-        f"行为：{action_label}。YOLO 原始框 {len(yolo_boxes)} 个，剔除明显误检 {len(false_positive_ids)} 个，最终绘制 {drawn_count} 个框。"
-    )
-    if missed_hint:
-        analysis = f"{analysis}提示：{missed_hint}。"
-    analysis = f"{analysis}（裁判原始返回已保存：{log_path.relative_to(LOG_DIR.parent).as_posix()}）"
-
-    detection_result = DetectionResult(
-        image_id=image_record_id,
-        person_count=drawn_count,
-        bounding_boxes_json=json.dumps(final_boxes, ensure_ascii=False),
-        llm_analysis_text=analysis,
-        result_image_path=f"static/results/{result_name}",
-        llm_api_provider=api_config.get("provider", "vision_model_vehicle_judge"),
-        llm_model_name=api_config.get("model", ""),
-        raw_llm_response_log_path=str(log_path),
-    )
-    db.session.add(detection_result)
-    db.session.commit()
-
-    return drawn_count, analysis, result_name, final_width, final_height
 
 
-def call_vision_model(
+def _call_vision_model_core(
     image_path: Path,
     image_record_id: int,
     api_config: dict,
-    draw_person_boxes,
-    analysis_prefix: str = "",
+    draw_boxes,
+    analysis_prefix: str,
+    request_detection_func,
+    count_key: str,
+    box_fallback_keys: tuple[str, ...],
+    provider_default: str,
+    target_name: str,
 ) -> tuple[int, str, str, int, int]:
+    """大模型视觉检测流程的通用核心逻辑。"""
     if not api_config["api_key"]:
         raise ValueError("未配置 API Key，请先设置大模型 API Key。")
 
@@ -536,21 +583,26 @@ def call_vision_model(
     model_image_info = {**model_image_info, "jpeg_bytes": jpeg_bytes}
     model_image_width, model_image_height = model_image.size
 
-    result, raw_log = request_detection(api_config, model_image_url, model_image_width, model_image_height, "整张图片")
+    result, raw_log = request_detection_func(api_config, model_image_url, model_image_width, model_image_height, "整张图片")
     log_payload = {"global": raw_log, "tiles": []}
     log_path = Path(save_model_response_log(image_path, api_config, log_payload, raw_log["content"], model_image_info))
 
     try:
-        person_count = int(result["person_count"])
+        count = int(result[count_key])
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"模型返回结果缺少有效 person_count：{result}") from exc
+        raise ValueError(f"模型返回结果缺少有效 {count_key}：{result}") from exc
 
     analysis = str(result.get("analysis") or "模型未返回说明。")
-    boxes = result.get("boxes") or result.get("persons") or result.get("people") or result.get("detections") or []
+    boxes = result.get("boxes")
     if not isinstance(boxes, list):
-        boxes = []
-    if len(boxes) > person_count:
-        boxes = boxes[:person_count]
+        for key in box_fallback_keys:
+            boxes = result.get(key)
+            if isinstance(boxes, list):
+                break
+        else:
+            boxes = []
+    if len(boxes) > count:
+        boxes = boxes[:count]
     merged_boxes = convert_boxes_to_model_coords(boxes, model_image_width, model_image_height)
 
     tile_added = 0
@@ -560,17 +612,24 @@ def call_vision_model(
             crop = model_image.crop((left, top, right, bottom))
             tile_url, _ = pil_image_to_data_url(crop)
             try:
-                tile_result, tile_log = request_detection(api_config, tile_url, crop.width, crop.height, f"第 {tile_index} 个局部区域")
+                tile_result, tile_log = request_detection_func(api_config, tile_url, crop.width, crop.height, f"第 {tile_index} 个局部区域")
             except Exception as exc:
                 tile_errors += 1
                 log_payload["tiles"].append({"tile": [left, top, right, bottom], "error": str(exc)})
                 continue
 
-            tile_boxes = tile_result.get("boxes") or tile_result.get("persons") or tile_result.get("people") or tile_result.get("detections") or []
-            if isinstance(tile_boxes, list) and len(merged_boxes) < person_count:
+            tile_boxes = tile_result.get("boxes")
+            if not isinstance(tile_boxes, list):
+                for key in box_fallback_keys:
+                    tile_boxes = tile_result.get(key)
+                    if isinstance(tile_boxes, list):
+                        break
+                else:
+                    tile_boxes = []
+            if isinstance(tile_boxes, list) and len(merged_boxes) < count:
                 before_count = len(merged_boxes)
                 merged_boxes = merge_boxes(merged_boxes + convert_boxes_to_model_coords(tile_boxes, crop.width, crop.height, left, top))
-                merged_boxes = limit_boxes(merged_boxes, person_count)
+                merged_boxes = limit_boxes(merged_boxes, count)
                 tile_added += max(0, len(merged_boxes) - before_count)
             log_payload["tiles"].append({"tile": [left, top, right, bottom], "result": tile_result, "raw_content": tile_log["content"], "raw_response": tile_log["response"]})
 
@@ -582,27 +641,69 @@ def call_vision_model(
         if tile_errors:
             analysis = f"{analysis}（有 {tile_errors} 个分块补检失败。）"
 
-    result_name, drawn_count = draw_person_boxes(image_path, merged_boxes, (model_image_width, model_image_height))
-    if drawn_count != person_count:
-        analysis = f"{analysis}（注意：模型识别人数为 {person_count}，合并后成功绘制的框为 {drawn_count} 个。）"
+    result_name, drawn_count = draw_boxes(image_path, merged_boxes, (model_image_width, model_image_height))
+    if drawn_count != count:
+        analysis = f"{analysis}（注意：模型识别{target_name}数为 {count}，合并后成功绘制的框为 {drawn_count} 个。）"
     if analysis_prefix:
         analysis = f"{analysis_prefix}{analysis}"
     analysis = f"{analysis}（原始返回已保存：{log_path.relative_to(LOG_DIR.parent).as_posix()}）"
 
     detection_result = DetectionResult(
         image_id=image_record_id,
-        person_count=person_count,
+        person_count=count,
         bounding_boxes_json=json.dumps(merged_boxes, ensure_ascii=False),
         llm_analysis_text=analysis,
         result_image_path=f"static/results/{result_name}",
-        llm_api_provider=api_config.get("provider", "vision_model"),
+        llm_api_provider=api_config.get("provider", provider_default),
         llm_model_name=api_config.get("model", ""),
         raw_llm_response_log_path=str(log_path),
     )
     db.session.add(detection_result)
     db.session.commit()
 
-    return person_count, analysis, result_name, model_image_width, model_image_height
+    return count, analysis, result_name, model_image_width, model_image_height
+
+
+def call_vision_model(
+    image_path: Path,
+    image_record_id: int,
+    api_config: dict,
+    draw_person_boxes,
+    analysis_prefix: str = "",
+) -> tuple[int, str, str, int, int]:
+    return _call_vision_model_core(
+        image_path,
+        image_record_id,
+        api_config,
+        draw_person_boxes,
+        analysis_prefix,
+        request_detection,
+        "person_count",
+        ("persons", "people", "detections"),
+        "vision_model",
+        "人",
+    )
+
+
+def call_vehicle_vision_model(
+    image_path: Path,
+    image_record_id: int,
+    api_config: dict,
+    draw_vehicle_boxes,
+    analysis_prefix: str = "",
+) -> tuple[int, str, str, int, int]:
+    return _call_vision_model_core(
+        image_path,
+        image_record_id,
+        api_config,
+        draw_vehicle_boxes,
+        analysis_prefix,
+        request_vehicle_detection,
+        "vehicle_count",
+        ("vehicles", "detections"),
+        "vision_model_vehicle",
+        "车辆",
+    )
 
 
 def build_vehicle_detection_prompt(width: int, height: int, scope: str = "整张图片") -> str:
@@ -635,87 +736,3 @@ def request_vehicle_detection(api_config: dict, image_url: str, width: int, heig
     payload = build_payload(api_config, build_vehicle_detection_prompt(width, height, scope), image_url, 4096)
     parsed, data, content = post_vision_json(api_config, payload)
     return parsed, {"response": data, "content": content}
-
-
-def call_vehicle_vision_model(
-    image_path: Path,
-    image_record_id: int,
-    api_config: dict,
-    draw_vehicle_boxes,
-    analysis_prefix: str = "",
-) -> tuple[int, str, str, int, int]:
-    if not api_config["api_key"]:
-        raise ValueError("未配置 API Key，请先设置大模型 API Key。")
-
-    model_image, model_image_info = prepare_model_image_object(image_path)
-    model_image_url, jpeg_bytes = pil_image_to_data_url(model_image)
-    model_image_info = {**model_image_info, "jpeg_bytes": jpeg_bytes}
-    model_image_width, model_image_height = model_image.size
-
-    result, raw_log = request_vehicle_detection(api_config, model_image_url, model_image_width, model_image_height, "整张图片")
-    log_payload = {"global": raw_log, "tiles": []}
-    log_path = Path(save_model_response_log(image_path, api_config, log_payload, raw_log["content"], model_image_info))
-
-    try:
-        vehicle_count = int(result["vehicle_count"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"模型返回结果缺少有效 vehicle_count：{result}") from exc
-
-    analysis = str(result.get("analysis") or "模型未返回说明。")
-    boxes = result.get("boxes") or result.get("vehicles") or result.get("detections") or []
-    if not isinstance(boxes, list):
-        boxes = []
-    if len(boxes) > vehicle_count:
-        boxes = boxes[:vehicle_count]
-    merged_boxes = convert_boxes_to_model_coords(boxes, model_image_width, model_image_height)
-
-    tile_added = 0
-    tile_errors = 0
-    if ENABLE_TILE_DETECTION:
-        for tile_index, (left, top, right, bottom) in enumerate(generate_tiles(model_image_width, model_image_height), start=1):
-            crop = model_image.crop((left, top, right, bottom))
-            tile_url, _ = pil_image_to_data_url(crop)
-            try:
-                tile_result, tile_log = request_vehicle_detection(api_config, tile_url, crop.width, crop.height, f"第 {tile_index} 个局部区域")
-            except Exception as exc:
-                tile_errors += 1
-                log_payload["tiles"].append({"tile": [left, top, right, bottom], "error": str(exc)})
-                continue
-
-            tile_boxes = tile_result.get("boxes") or tile_result.get("vehicles") or tile_result.get("detections") or []
-            if isinstance(tile_boxes, list) and len(merged_boxes) < vehicle_count:
-                before_count = len(merged_boxes)
-                merged_boxes = merge_boxes(merged_boxes + convert_boxes_to_model_coords(tile_boxes, crop.width, crop.height, left, top))
-                merged_boxes = limit_boxes(merged_boxes, vehicle_count)
-                tile_added += max(0, len(merged_boxes) - before_count)
-            log_payload["tiles"].append({"tile": [left, top, right, bottom], "result": tile_result, "raw_content": tile_log["content"], "raw_response": tile_log["response"]})
-
-        saved_log = json.loads(log_path.read_text(encoding="utf-8"))
-        saved_log["raw_response"] = log_payload
-        log_path.write_text(json.dumps(saved_log, ensure_ascii=False, indent=2), encoding="utf-8")
-        if tile_added:
-            analysis = f"{analysis}（分块补检新增 {tile_added} 个候选框。）"
-        if tile_errors:
-            analysis = f"{analysis}（有 {tile_errors} 个分块补检失败。）"
-
-    result_name, drawn_count = draw_vehicle_boxes(image_path, merged_boxes, (model_image_width, model_image_height))
-    if drawn_count != vehicle_count:
-        analysis = f"{analysis}（注意：模型识别车辆数为 {vehicle_count}，合并后成功绘制的框为 {drawn_count} 个。）"
-    if analysis_prefix:
-        analysis = f"{analysis_prefix}{analysis}"
-    analysis = f"{analysis}（原始返回已保存：{log_path.relative_to(LOG_DIR.parent).as_posix()}）"
-
-    detection_result = DetectionResult(
-        image_id=image_record_id,
-        person_count=vehicle_count,
-        bounding_boxes_json=json.dumps(merged_boxes, ensure_ascii=False),
-        llm_analysis_text=analysis,
-        result_image_path=f"static/results/{result_name}",
-        llm_api_provider=api_config.get("provider", "vision_model_vehicle"),
-        llm_model_name=api_config.get("model", ""),
-        raw_llm_response_log_path=str(log_path),
-    )
-    db.session.add(detection_result)
-    db.session.commit()
-
-    return vehicle_count, analysis, result_name, model_image_width, model_image_height

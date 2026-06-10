@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from models import db, ImageRecord, DetectionResult, VideoRecord
@@ -83,7 +83,7 @@ def serialize_video_record(record):
         "video_path": record.video_path.replace("\\", "/") if record.video_path else "",
         "processed_video_path": record.processed_video_path.replace("\\", "/") if record.processed_video_path else "",
         "error_message": record.error_message or "",
-        "has_result": bool(record.processed_video_path and Path(record.processed_video_path).exists()),
+        "has_result": bool(record.processed_video_path),
     }
 
 
@@ -115,7 +115,7 @@ def query_image_records(history_type="all", page=1, per_page=20,
 
     if end_date:
         try:
-            ed = datetime.strptime(end_date, "%Y-%m-%d") + __import__("datetime").timedelta(days=1)
+            ed = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
             query = query.filter(ImageRecord.uploaded_at < ed)
         except ValueError:
             pass
@@ -172,7 +172,7 @@ def query_video_records(detection_target="person", page=1, per_page=20,
 
     if end_date:
         try:
-            ed = datetime.strptime(end_date, "%Y-%m-%d") + __import__("datetime").timedelta(days=1)
+            ed = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
             query = query.filter(VideoRecord.uploaded_at < ed)
         except ValueError:
             pass

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>摄像头实时 YOLO 检测</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+    <main class="app-shell">
+        <header class="topbar">
+            <div>
+                <h1>摄像头实时 YOLO 检测</h1>
+                <p>本地摄像头画面实时上传到 Flask 后端，由 YOLO 返回检测框并在浏览器端绘制。</p>
+            </div>
+            <span class="mode-pill" id="targetPill">人员检测</span>
+        </header>
+
+        <section class="workspace">
+            <section class="panel camera-panel">
+                <div class="view-grid">
+                    <article class="feed">
+                        <div class="feed-head">
+                            <div>
+                                <strong>原始画面</strong>
+                                <span>Camera Input</span>
+                            </div>
+                            <span class="chip">本机摄像头</span>
+                        </div>
+                        <div class="camera-view">
+                            <video id="cameraVideo" autoplay playsinline muted></video>
+                            <div class="placeholder" id="cameraPlaceholder">
+                                <strong>点击开始后显示摄像头画面</strong>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="feed">
+                        <div class="feed-head">
+                            <div>
+                                <strong>检测画面</strong>
+                                <span>YOLO Overlay</span>
+                            </div>
+                            <span class="chip live">实时</span>
+                        </div>
+                        <div class="camera-view">
+                            <video id="detectVideo" autoplay playsinline muted></video>
+                            <canvas id="overlay" class="overlay"></canvas>
+                            <div class="placeholder" id="detectPlaceholder">
+                                <strong>检测框会显示在这里</strong>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+
+                <div class="controls">
+                    <label class="field">
+                        <span>摄像头</span>
+                        <select id="cameraSelect" disabled>
+                            <option value="">正在检测设备...</option>
+                        </select>
+                    </label>
+                    <div class="button-row">
+                        <button type="button" id="startButton">开始</button>
+                        <button type="button" id="monitorButton" class="secondary" disabled>实时检测</button>
+                        <button type="button" id="targetButton" class="secondary" disabled>切换车辆</button>
+                        <button type="button" id="recordButton" class="secondary" disabled>开始录像</button>
+                        <button type="button" id="stopButton" class="danger" disabled>停止</button>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="panel status-panel">
+                <h2>状态</h2>
+                <div class="status-line">
+                    <span class="status-dot idle" id="statusDot"></span>
+                    <strong id="statusText">就绪</strong>
+                </div>
+
+                <div class="counter">
+                    <span id="countLabel">当前人数</span>
+                    <strong id="countText">0</strong>
+                </div>
+                <p class="meta" id="detectMeta">未开始实时检测</p>
+
+                <div class="record-panel" id="recordPanel" hidden>
+                    <div class="record-head">
+                        <div>
+                            <strong>录像回放</strong>
+                            <span id="recordMeta">刚刚录制</span>
+                        </div>
+                        <a id="recordDownload" class="download" href="#" download="camera-recording.webm">下载录像</a>
+                    </div>
+                    <video id="recordPreview" controls></video>
+                </div>
+            </aside>
+        </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

@@ -13,6 +13,8 @@ const form = document.getElementById("uploadForm");
 const submitButton = document.getElementById("submitButton");
 const uploadImagePreview = document.getElementById("uploadImagePreview");
 const uploadPreviewImage = document.getElementById("uploadPreviewImage");
+const imageYoloModel = document.getElementById("imageYoloModel");
+const imageCurrentYoloModel = document.getElementById("imageCurrentYoloModel");
 
 function openApiModal() {
     apiModal.classList.add("open");
@@ -68,6 +70,13 @@ if (openApiButton) {
 }
 
 if (input) {
+    if (imageYoloModel && imageCurrentYoloModel) {
+        imageCurrentYoloModel.textContent = imageYoloModel.value;
+        imageYoloModel.addEventListener("change", () => {
+            imageCurrentYoloModel.textContent = imageYoloModel.value;
+        });
+    }
+
     input.addEventListener("change", () => updatePreview(input.files[0]));
 
     ["dragenter", "dragover"].forEach((eventName) => {

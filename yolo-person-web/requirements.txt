@@ -5,3 +5,4 @@ requests
 ultralytics
 opencv-python
 openpyxl
+aiortc

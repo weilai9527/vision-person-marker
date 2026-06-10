@@ -3,8 +3,25 @@
     var dashboard = document.getElementById("dashboard");
     var sidebarToggle = document.getElementById("sidebarToggle");
     var topbarMenuBtn = document.getElementById("topbarMenuBtn");
+    var mobileOverlay = document.getElementById("mobileOverlay");
+
+    function isMobileLayout() {
+        return window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+    }
+
+    function openMobileSidebar() {
+        dashboard.classList.add("mobile-sidebar-open");
+    }
+
+    function closeMobileSidebar() {
+        dashboard.classList.remove("mobile-sidebar-open");
+    }
 
     function toggleSidebar() {
+        if (isMobileLayout()) {
+            dashboard.classList.toggle("mobile-sidebar-open");
+            return;
+        }
         dashboard.classList.toggle("sidebar-collapsed");
         var isCollapsed = dashboard.classList.contains("sidebar-collapsed");
         localStorage.setItem("sidebarCollapsed", isCollapsed ? "true" : "false");
@@ -16,11 +33,24 @@
     if (topbarMenuBtn) {
         topbarMenuBtn.addEventListener("click", toggleSidebar);
     }
+    if (mobileOverlay) {
+        mobileOverlay.addEventListener("click", closeMobileSidebar);
+    }
 
     var savedState = localStorage.getItem("sidebarCollapsed");
-    if (savedState === "true") {
+    if (savedState === "true" && !isMobileLayout()) {
         dashboard.classList.add("sidebar-collapsed");
     }
+    window.addEventListener("resize", function () {
+        if (isMobileLayout()) {
+            dashboard.classList.remove("sidebar-collapsed");
+        } else {
+            closeMobileSidebar();
+            if (localStorage.getItem("sidebarCollapsed") === "true") {
+                dashboard.classList.add("sidebar-collapsed");
+            }
+        }
+    });
 
     var apiModal = document.getElementById("apiModal");
     var openApiButton = document.getElementById("openApiButton");

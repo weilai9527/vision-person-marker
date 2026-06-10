@@ -7,15 +7,21 @@ from datetime import datetime, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
 
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
 from flask import jsonify, send_file
+from openpyxl.utils import get_column_letter
 
 from models import db, ImageRecord, DetectionResult, VideoRecord
 
 logger = logging.getLogger(__name__)
 
 EXPORT_TASKS = {}
+
+
+def create_excel_workbook():
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+
+    return Workbook(), Font, Alignment
 
 EXPORT_FORMATS = {
     "csv": {"label": "CSV", "mime": "text/csv"},
@@ -56,6 +62,12 @@ VIDEO_FIELD_MAP = {
 
 
 def create_export_task(task_type, params):
+    # 清理超过 24 小时的旧任务，防止内存泄漏
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    stale_ids = [tid for tid, t in list(EXPORT_TASKS.items()) if t["created_at"] < cutoff]
+    for tid in stale_ids:
+        EXPORT_TASKS.pop(tid, None)
+
     task_id = uuid.uuid4().hex[:12]
     EXPORT_TASKS[task_id] = {
         "id": task_id,
@@ -87,6 +99,10 @@ def get_task(task_id):
 
 
 def get_export_history(limit=20):
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    stale_ids = [tid for tid, t in list(EXPORT_TASKS.items()) if t["created_at"] < cutoff]
+    for tid in stale_ids:
+        EXPORT_TASKS.pop(tid, None)
     tasks = sorted(EXPORT_TASKS.values(), key=lambda t: t["created_at"], reverse=True)
     return tasks[:limit]
 
@@ -310,7 +326,7 @@ def get_video_row_data(record, fields):
 
 
 def export_to_excel(records, fields, is_image, is_pedestrian, task):
-    wb = Workbook()
+    wb, Font, Alignment = create_excel_workbook()
     ws = wb.active
     ws.title = "检测数据"
 
@@ -347,7 +363,7 @@ def export_to_excel(records, fields, is_image, is_pedestrian, task):
         for cell in col:
             if cell.value:
                 max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[chr(64 + i) if i <= 26 else 'A'].width = min(max_len + 4, 60)
+        ws.column_dimensions[get_column_letter(i)].width = min(max_len + 4, 60)
 
     buffer = BytesIO()
     wb.save(buffer)

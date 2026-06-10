@@ -5,7 +5,7 @@
 {% block body_attrs %} data-detection-target="vehicle" data-video-api-base="/api/vehicle/video" data-shared-video-api-base="/api/video"{% endblock %}
 
 {% block content %}
-<section class="workspace">
+<section class="workspace video-detect-workspace">
     <div class="video-preview-section" id="videoPreviewSection">
         <div class="video-preview-panel video-preview-original">
             <div class="video-preview-header">
@@ -54,6 +54,15 @@
             <span class="api-status">本地 YOLO</span>
         </div>
         <form id="videoForm">
+            <label class="field yolo-model-field" for="videoYoloModel">
+                <span>YOLO 模型</span>
+                <select id="videoYoloModel" name="yolo_model">
+                    {% for model in yolo_models %}
+                    <option value="{{ model.name }}" {% if default_yolo_model_name == model.name %}selected{% endif %}>{{ model.label }}</option>
+                    {% endfor %}
+                </select>
+                <small class="selected-model-text">当前模型：<strong id="videoCurrentYoloModel">{{ default_yolo_model_name }}</strong></small>
+            </label>
             <label class="dropzone video-dropzone" id="videoDropzone" for="videoInput">
                 <span class="dropzone-main">
                     <span class="upload-mark">+</span>
@@ -72,7 +81,7 @@
         </form>
     </div>
 
-    <aside class="surface progress-panel">
+    <aside class="surface progress-panel" data-progress="0%">
         <h2 class="surface-title">处理进度</h2>
         <div class="progress-row">
             <div class="progress-bar"><span id="progressFill"></span></div>
@@ -93,7 +102,7 @@
     </aside>
 </section>
 
-<section class="surface video-history">
+<section class="surface video-history video-detect-history">
     <div class="surface-header">
         <div>
             <h2 class="surface-title">车辆视频记录</h2>

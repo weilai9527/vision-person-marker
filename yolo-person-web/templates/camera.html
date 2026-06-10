@@ -28,24 +28,44 @@
                 </div>
             </section>
 
-            <section class="camera-feed camera-feed-detection">
+            <section class="camera-feed camera-feed-detection" hidden>
                 <div class="camera-feed-header">
                     <div>
-                        <span class="camera-feed-title">检测画面</span>
-                        <span class="camera-feed-subtitle">YOLO Overlay</span>
+                        <span class="camera-feed-title">识别画面</span>
+                        <span class="camera-feed-subtitle">Frame Sent To YOLO</span>
                     </div>
-                    <span class="camera-feed-chip is-live">实时</span>
+                    <span class="camera-feed-chip is-live">送检帧</span>
                 </div>
                 <div class="camera-view">
-                    <video id="cameraDetectVideo" autoplay playsinline muted></video>
-                    <canvas id="cameraOverlay" class="camera-overlay" aria-hidden="true"></canvas>
+                    <canvas id="cameraRecognitionFrame" class="camera-frame-canvas" aria-label="YOLO 识别帧"></canvas>
                     <div class="camera-placeholder" id="cameraDetectPlaceholder">
                         <span class="camera-placeholder-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" fill="none">
                                 <path d="M15 10l4.55-2.27A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </span>
-                        <strong>实时检测结果会显示在这里</strong>
+                        <strong>送到 YOLO 的识别帧会显示在这里</strong>
+                    </div>
+                </div>
+            </section>
+
+            <section class="camera-feed camera-feed-result">
+                <div class="camera-feed-header">
+                    <div>
+                        <span class="camera-feed-title">标注结果</span>
+                        <span class="camera-feed-subtitle">Annotated Result</span>
+                    </div>
+                    <span class="camera-feed-chip is-live">实时标注</span>
+                </div>
+                <div class="camera-view">
+                    <canvas id="cameraResultCanvas" class="camera-frame-canvas" aria-label="YOLO 标注结果"></canvas>
+                    <div class="camera-placeholder" id="cameraResultPlaceholder">
+                        <span class="camera-placeholder-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none">
+                                <path d="M15 10l4.55-2.27A1 1 0 0121 8.62v6.76a1 1 0 01-1.45.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </span>
+                        <strong>检测框会显示在这里</strong>
                     </div>
                 </div>
             </section>
@@ -59,12 +79,21 @@
                 </select>
             </label>
 
+            <label class="field camera-model-field" for="cameraYoloModelSelect">
+                <span>YOLO 模型</span>
+                <select id="cameraYoloModelSelect">
+                    {% for model in yolo_models %}
+                    <option value="{{ model.name }}" {% if default_yolo_model_name == model.name %}selected{% endif %}>{{ model.label }}</option>
+                    {% endfor %}
+                </select>
+                <small class="selected-model-text">当前模型：<strong id="cameraCurrentYoloModel">{{ default_yolo_model_name }}</strong></small>
+            </label>
+
             <div class="camera-buttons">
-                <button type="button" id="startCameraButton">开始</button>
+                <button type="button" id="cameraPowerButton">开始</button>
                 <button type="button" class="button-secondary" id="monitorCameraButton" disabled>实时检测</button>
                 <button type="button" class="button-secondary" id="targetToggleButton" disabled>切换车辆</button>
                 <button type="button" class="button-secondary" id="recordCameraButton" disabled>开始录像</button>
-                <button type="button" class="button-danger" id="stopCameraButton" disabled>停止</button>
             </div>
         </div>
     </div>
@@ -82,6 +111,10 @@
             <div class="camera-live-count">
                 <span id="cameraCountLabel">当前人数</span>
                 <strong id="cameraPersonCount">0</strong>
+            </div>
+            <div class="camera-live-count">
+                <span id="cameraTotalLabel">累计人数</span>
+                <strong id="cameraTotalCount">0</strong>
             </div>
             <div class="camera-live-meta" id="cameraDetectMeta">未开始实时检测</div>
         </div>

@@ -4,7 +4,7 @@
 {% block breadcrumb %}人员检测 / 人员图片{% endblock %}
 
 {% block content %}
-<section class="workspace">
+<section class="workspace image-detect-workspace">
     <div class="surface upload-surface">
         <div class="surface-header">
             <div>
@@ -15,6 +15,15 @@
         </div>
 
         <form method="post" enctype="multipart/form-data" id="uploadForm">
+            <label class="field yolo-model-field" for="imageYoloModel">
+                <span>YOLO 模型</span>
+                <select id="imageYoloModel" name="yolo_model">
+                    {% for model in yolo_models %}
+                    <option value="{{ model.name }}" {% if (selected_yolo_model or default_yolo_model_name) == model.name %}selected{% endif %}>{{ model.label }}</option>
+                    {% endfor %}
+                </select>
+                <small class="selected-model-text">当前模型：<strong id="imageCurrentYoloModel">{{ selected_yolo_model or default_yolo_model_name }}</strong></small>
+            </label>
             <label class="dropzone image-dropzone" id="dropzone" for="imageInput">
                 <span class="dropzone-main">
                     <span class="upload-mark">+</span>
@@ -57,7 +66,7 @@
 {% endif %}
 
 {% if person_count is not none %}
-<section class="result">
+<section class="result image-detect-result">
     <div class="surface result-summary">
         <div class="count-label">检测人数</div>
         <div class="count">{{ person_count }}</div>

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: yolo_person_web
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      # 挂载 SQLite 数据库目录（含日志、API 配置等）
+      - ./instance:/app/instance
+      # 挂载上传的原始图片（匹配 config.py 中 UPLOAD_DIR = BASE_DIR / "static" / "uploads"）
+      - ./static/uploads:/app/static/uploads
+      # 挂载处理结果图和视频
+      - ./static/results:/app/static/results
+      # 挂载上传的视频文件（匹配 config.py 中 VIDEO_UPLOAD_DIR = BASE_DIR / "static" / "videos"）
+      - ./static/videos:/app/static/videos
+      # 挂载视频处理结果（匹配 config.py 中 VIDEO_RESULT_DIR = BASE_DIR / "static" / "video_results"）
+      - ./static/video_results:/app/static/video_results
+    environment:
+      - FLASK_ENV=production
+      - TZ=Asia/Shanghai  # 修正时区，保证数据库记录的时间是北京时间

@@ -1,20 +1,24 @@
 (function () {
     const video = document.getElementById("cameraVideo");
-    const detectVideo = document.getElementById("cameraDetectVideo");
-    const startButton = document.getElementById("startCameraButton");
-    const stopButton = document.getElementById("stopCameraButton");
+    const powerButton = document.getElementById("cameraPowerButton");
     const cameraSelect = document.getElementById("cameraSelect");
+    const yoloModelSelect = document.getElementById("cameraYoloModelSelect");
+    const currentYoloModelText = document.getElementById("cameraCurrentYoloModel");
     const statusText = document.getElementById("cameraStatusText");
     const statusDot = document.getElementById("cameraStatusDot");
     const placeholder = document.getElementById("cameraPlaceholder");
     const detectPlaceholder = document.getElementById("cameraDetectPlaceholder");
+    const resultPlaceholder = document.getElementById("cameraResultPlaceholder");
     const hint = document.getElementById("cameraHint");
     const toast = document.getElementById("globalToast");
-    const overlay = document.getElementById("cameraOverlay");
+    const recognitionCanvas = document.getElementById("cameraRecognitionFrame");
+    const resultCanvas = document.getElementById("cameraResultCanvas");
     const monitorButton = document.getElementById("monitorCameraButton");
     const targetToggleButton = document.getElementById("targetToggleButton");
     const recordButton = document.getElementById("recordCameraButton");
     const personCountText = document.getElementById("cameraPersonCount");
+    const totalCountLabel = document.getElementById("cameraTotalLabel");
+    const totalCountText = document.getElementById("cameraTotalCount");
     const detectMeta = document.getElementById("cameraDetectMeta");
     const recordPanel = document.getElementById("cameraRecordPanel");
     const recordPreview = document.getElementById("cameraRecordPreview");
@@ -34,9 +38,40 @@
     let recordStartedAt = 0;
     let recordTimer = null;
     let recordUrl = null;
+    let detectionTarget = "both";
+    let lastRequestMs = 0;
+    let resultAnimationFrameId = null;
+    let sessionTotalCount = 0;
+    let cameraSessionId = "";
+    let shouldResetBackendTracking = false;
+    let peerConnection = null;
+    let webRTCResultTimer = null;
+    let webRTCActive = false;
+    let lastWebRTCSequence = 0;
+    let webRTCFallback = false;
+    let nextTrackId = 1;
+    let trackedTargets = [];
+    const minDetectDelay = 180;
+    const maxDetectDelay = 900;
+    const cameraFrameMaxSide = 1280;
+    const detectTimeoutMs = 10000;
+    const trackIouThreshold = 0.24;
+    const trackCenterRatio = 0.32;
+    const trackMaxMisses = 4;
     const captureCanvas = document.createElement("canvas");
     const captureContext = captureCanvas.getContext("2d", { willReadFrequently: true });
-    const overlayContext = overlay.getContext("2d");
+    const recognitionContext = recognitionCanvas.getContext("2d");
+    const resultContext = resultCanvas.getContext("2d");
+
+    function getSelectedYoloModel() {
+        return yoloModelSelect ? yoloModelSelect.value : "";
+    }
+
+    function syncCurrentYoloModel() {
+        if (yoloModelSelect && currentYoloModelText) {
+            currentYoloModelText.textContent = yoloModelSelect.value;
+        }
+    }
 
     function isSecureCameraContext() {
         const host = window.location.hostname;
@@ -44,6 +79,9 @@
     }
 
     function showToast(message, type) {
+        if (!toast) {
+            return;
+        }
         window.clearTimeout(toastTimer);
         toast.textContent = message;
         toast.className = `toast ${type} show`;
@@ -59,7 +97,10 @@
 
     function setPlaceholder(visible) {
         placeholder.classList.toggle("is-hidden", !visible);
-        detectPlaceholder.classList.toggle("is-hidden", !visible);
+        if (visible) {
+            detectPlaceholder.classList.remove("is-hidden");
+            resultPlaceholder.classList.remove("is-hidden");
+        }
     }
 
     function updateMonitorButton() {
@@ -67,18 +108,152 @@
         monitorButton.textContent = monitoring ? "暂停检测" : "实时检测";
     }
 
+    function updatePowerButton() {
+        if (!powerButton) {
+            return;
+        }
+        powerButton.disabled = !stream && devices.length === 0;
+        powerButton.textContent = stream ? "停止" : "开始";
+        powerButton.classList.toggle("button-danger", Boolean(stream));
+    }
+
     function updateTargetToggleButton() {
         targetToggleButton.disabled = !stream;
-        targetToggleButton.textContent = detectionTarget === "person" ? "切换车辆" : "切换人员";
-        document.getElementById("cameraCountLabel").textContent = detectionTarget === "person" ? "当前人数" : "当前车辆数";
-        document.getElementById("cameraFeedChip").textContent = detectionTarget === "person" ? "人员检测" : "车辆检测";
+        if (detectionTarget === "both") {
+            targetToggleButton.textContent = "仅检测人员";
+            document.getElementById("cameraCountLabel").textContent = "当前目标";
+            if (totalCountLabel) totalCountLabel.textContent = "累计目标";
+            document.getElementById("cameraFeedChip").textContent = "人员+车辆";
+        } else if (detectionTarget === "person") {
+            targetToggleButton.textContent = "仅检测车辆";
+            document.getElementById("cameraCountLabel").textContent = "当前人数";
+            if (totalCountLabel) totalCountLabel.textContent = "累计人数";
+            document.getElementById("cameraFeedChip").textContent = "人员检测";
+        } else {
+            targetToggleButton.textContent = "合并检测";
+            document.getElementById("cameraCountLabel").textContent = "当前车辆数";
+            if (totalCountLabel) totalCountLabel.textContent = "累计车辆数";
+            document.getElementById("cameraFeedChip").textContent = "车辆检测";
+        }
     }
 
     function toggleTarget() {
-        detectionTarget = detectionTarget === "person" ? "vehicle" : "person";
+        if (detectionTarget === "both") {
+            detectionTarget = "person";
+        } else if (detectionTarget === "person") {
+            detectionTarget = "vehicle";
+        } else {
+            detectionTarget = "both";
+        }
         updateTargetToggleButton();
         clearDetections();
-        detectMeta.textContent = `已切换为${detectionTarget === "person" ? "人员" : "车辆"}检测`;
+        resetSessionTotal();
+        const label = detectionTarget === "both" ? "人员+车辆合并" : (detectionTarget === "person" ? "人员" : "车辆");
+        detectMeta.textContent = `已切换为${label}检测`;
+        if (monitoring && stream && webRTCActive) {
+            startWebRTCDetection().catch(() => {
+                webRTCFallback = true;
+                detectFrame();
+            });
+        }
+    }
+
+    function resetSessionTotal() {
+        sessionTotalCount = 0;
+        nextTrackId = 1;
+        trackedTargets = [];
+        shouldResetBackendTracking = true;
+        if (totalCountText) totalCountText.textContent = "0";
+    }
+
+    function boxArea(box) {
+        return Math.max(0, Number(box.x2) - Number(box.x1)) * Math.max(0, Number(box.y2) - Number(box.y1));
+    }
+
+    function boxIntersection(first, second) {
+        const left = Math.max(Number(first.x1), Number(second.x1));
+        const top = Math.max(Number(first.y1), Number(second.y1));
+        const right = Math.min(Number(first.x2), Number(second.x2));
+        const bottom = Math.min(Number(first.y2), Number(second.y2));
+        return Math.max(0, right - left) * Math.max(0, bottom - top);
+    }
+
+    function boxIou(first, second) {
+        const intersection = boxIntersection(first, second);
+        const union = boxArea(first) + boxArea(second) - intersection;
+        return union > 0 ? intersection / union : 0;
+    }
+
+    function centerDistanceRatio(first, second) {
+        const firstCx = (Number(first.x1) + Number(first.x2)) / 2;
+        const firstCy = (Number(first.y1) + Number(first.y2)) / 2;
+        const secondCx = (Number(second.x1) + Number(second.x2)) / 2;
+        const secondCy = (Number(second.y1) + Number(second.y2)) / 2;
+        const distance = Math.hypot(firstCx - secondCx, firstCy - secondCy);
+        const firstDiag = Math.max(1, Math.hypot(Number(first.x2) - Number(first.x1), Number(first.y2) - Number(first.y1)));
+        const secondDiag = Math.max(1, Math.hypot(Number(second.x2) - Number(second.x1), Number(second.y2) - Number(second.y1)));
+        return distance / Math.max(firstDiag, secondDiag);
+    }
+
+    function trackMatchScore(track, box) {
+        if (track.target !== (box.detection_target || "person")) {
+            return -1;
+        }
+        const iou = boxIou(track.box, box);
+        const distanceRatio = centerDistanceRatio(track.box, box);
+        if (iou < trackIouThreshold && distanceRatio > trackCenterRatio) {
+            return -1;
+        }
+        return iou + Math.max(0, trackCenterRatio - distanceRatio);
+    }
+
+    function updateTrackedTargets(detection) {
+        if (!detection || !Array.isArray(detection.boxes)) {
+            return 0;
+        }
+
+        trackedTargets.forEach((track) => {
+            track.missed += 1;
+            track.matched = false;
+        });
+
+        let newTrackCount = 0;
+        detection.boxes.forEach((box) => {
+            let bestTrack = null;
+            let bestScore = -1;
+            trackedTargets.forEach((track) => {
+                if (track.matched) {
+                    return;
+                }
+                const score = trackMatchScore(track, box);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestTrack = track;
+                }
+            });
+
+            if (bestTrack) {
+                bestTrack.box = { ...box };
+                bestTrack.missed = 0;
+                bestTrack.matched = true;
+                box.track_id = bestTrack.id;
+            } else {
+                const track = {
+                    id: nextTrackId,
+                    target: box.detection_target || "person",
+                    box: { ...box },
+                    missed: 0,
+                    matched: true,
+                };
+                nextTrackId += 1;
+                trackedTargets.push(track);
+                box.track_id = track.id;
+                newTrackCount += 1;
+            }
+        });
+
+        trackedTargets = trackedTargets.filter((track) => track.missed <= trackMaxMisses);
+        return newTrackCount;
     }
 
     function formatDuration(totalSeconds) {
@@ -112,71 +287,131 @@
         recordUrl = null;
     }
 
-    function resizeOverlay() {
-        const rect = overlay.getBoundingClientRect();
+    function resizeCanvas(canvas, context) {
+        const rect = canvas.getBoundingClientRect();
         const ratio = window.devicePixelRatio || 1;
         const width = Math.max(1, Math.round(rect.width * ratio));
         const height = Math.max(1, Math.round(rect.height * ratio));
 
-        if (overlay.width !== width || overlay.height !== height) {
-            overlay.width = width;
-            overlay.height = height;
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
         }
 
-        overlayContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
         return rect;
     }
 
-    function clearDetections() {
-        const rect = resizeOverlay();
-        overlayContext.clearRect(0, 0, rect.width, rect.height);
-        lastDetection = null;
-        personCountText.textContent = "0";
+    function drawFrameToCanvas(canvas, context, sourceCanvas) {
+        const rect = resizeCanvas(canvas, context);
+        context.clearRect(0, 0, rect.width, rect.height);
+
+        const sourceWidth = sourceCanvas.videoWidth || sourceCanvas.width;
+        const sourceHeight = sourceCanvas.videoHeight || sourceCanvas.height;
+        if (!sourceWidth || !sourceHeight) {
+            return { rect, scale: 1, offsetX: 0, offsetY: 0, drawWidth: 0, drawHeight: 0 };
+        }
+
+        const scale = Math.min(rect.width / sourceWidth, rect.height / sourceHeight);
+        const drawWidth = sourceWidth * scale;
+        const drawHeight = sourceHeight * scale;
+        const offsetX = (rect.width - drawWidth) / 2;
+        const offsetY = (rect.height - drawHeight) / 2;
+        context.drawImage(sourceCanvas, 0, 0, sourceWidth, sourceHeight, offsetX, offsetY, drawWidth, drawHeight);
+        return { rect, scale, offsetX, offsetY, drawWidth, drawHeight };
     }
 
-    function drawDetections(detection) {
-        const rect = resizeOverlay();
-        overlayContext.clearRect(0, 0, rect.width, rect.height);
+    function renderRecognitionFrame() {
+        if (recognitionCanvas.closest("[hidden]")) {
+            return;
+        }
+        drawFrameToCanvas(recognitionCanvas, recognitionContext, captureCanvas);
+        detectPlaceholder.classList.add("is-hidden");
+    }
 
+    function clearDetections() {
+        let rect = resizeCanvas(recognitionCanvas, recognitionContext);
+        recognitionContext.clearRect(0, 0, rect.width, rect.height);
+        rect = resizeCanvas(resultCanvas, resultContext);
+        resultContext.clearRect(0, 0, rect.width, rect.height);
+        lastDetection = null;
+        personCountText.textContent = "0";
+        resetSessionTotal();
+    }
+
+    function drawDetectionBoxes(detection, frame) {
         if (!detection || !detection.boxes || !detection.boxes.length) {
             return;
         }
 
-        const refWidth = detectVideo.videoWidth || detection.width;
-        const refHeight = detectVideo.videoHeight || detection.height;
-        const scale = Math.min(rect.width / refWidth, rect.height / refHeight);
-        const drawWidth = refWidth * scale;
-        const drawHeight = refHeight * scale;
-        const offsetX = (rect.width - drawWidth) / 2;
-        const offsetY = (rect.height - drawHeight) / 2;
+        const detectionWidth = detection.width || captureCanvas.width || video.videoWidth;
+        const detectionHeight = detection.height || captureCanvas.height || video.videoHeight;
+        if (!detectionWidth || !detectionHeight || !frame.drawWidth || !frame.drawHeight) {
+            return;
+        }
 
-        overlayContext.lineWidth = 2;
-        overlayContext.font = "13px Microsoft YaHei, Arial, sans-serif";
-        overlayContext.textBaseline = "top";
-
+        const scaleX = frame.drawWidth / detectionWidth;
+        const scaleY = frame.drawHeight / detectionHeight;
+        resultContext.lineWidth = 2;
+        resultContext.font = "13px Microsoft YaHei, Arial, sans-serif";
+        resultContext.textBaseline = "top";
         detection.boxes.forEach((box, index) => {
-            const boxX1 = box.x1 * (refWidth / detection.width);
-            const boxY1 = box.y1 * (refHeight / detection.height);
-            const boxX2 = box.x2 * (refWidth / detection.width);
-            const boxY2 = box.y2 * (refHeight / detection.height);
+            const isVehicle = box.detection_target === "vehicle";
+            const strokeColor = isVehicle ? "#2f8cff" : "#00d46a";
+            const labelColor = isVehicle ? "#1765d8" : "#00a656";
+            const fillColor = isVehicle ? "rgba(47, 140, 255, 0.16)" : "rgba(0, 212, 106, 0.16)";
+            const x = frame.offsetX + box.x1 * scaleX;
+            const y = frame.offsetY + box.y1 * scaleY;
+            const width = (box.x2 - box.x1) * scaleX;
+            const height = (box.y2 - box.y1) * scaleY;
+            const confidence = Number.isFinite(Number(box.conf)) ? Number(box.conf).toFixed(2) : "";
+            const labelPrefix = isVehicle ? (box.class_name || "vehicle") : "person";
+            const labelId = box.track_id ? `#${box.track_id}` : `${index + 1}`;
+            const label = confidence ? `${labelId} ${labelPrefix} ${confidence}` : `${labelId} ${labelPrefix}`;
+            const labelWidth = resultContext.measureText(label).width + 12;
 
-            const x = offsetX + boxX1 * scale;
-            const y = offsetY + boxY1 * scale;
-            const width = (boxX2 - boxX1) * scale;
-            const height = (boxY2 - boxY1) * scale;
-            const label = `${index + 1}`;
-            const labelWidth = overlayContext.measureText(label).width + 12;
+            resultContext.strokeStyle = strokeColor;
+            resultContext.fillStyle = fillColor;
+            resultContext.strokeRect(x, y, width, height);
+            resultContext.fillRect(x, y, width, height);
 
-            overlayContext.strokeStyle = "#00d46a";
-            overlayContext.fillStyle = "rgba(0, 212, 106, 0.16)";
-            overlayContext.strokeRect(x, y, width, height);
-            overlayContext.fillRect(x, y, width, height);
-
-            overlayContext.fillStyle = "#00a656";
-            overlayContext.fillRect(x, Math.max(0, y - 20), labelWidth, 20);
-            overlayContext.fillStyle = "#ffffff";
-            overlayContext.fillText(label, x + 6, Math.max(0, y - 17));
+            resultContext.fillStyle = labelColor;
+            resultContext.fillRect(x, Math.max(0, y - 20), labelWidth, 20);
+            resultContext.fillStyle = "#ffffff";
+            resultContext.fillText(label, x + 6, Math.max(0, y - 17));
         });
+    }
+
+    function drawDetections(detection) {
+        const source = stream && video.videoWidth ? video : captureCanvas;
+        const frame = drawFrameToCanvas(resultCanvas, resultContext, source);
+        resultPlaceholder.classList.add("is-hidden");
+        drawDetectionBoxes(detection, frame);
+    }
+
+    function renderResultLoop() {
+        if (!stream) {
+            resultAnimationFrameId = null;
+            return;
+        }
+
+        const frame = drawFrameToCanvas(resultCanvas, resultContext, video);
+        resultPlaceholder.classList.add("is-hidden");
+        drawDetectionBoxes(lastDetection, frame);
+        resultAnimationFrameId = window.requestAnimationFrame(renderResultLoop);
+    }
+
+    function startResultLoop() {
+        if (!resultAnimationFrameId) {
+            resultAnimationFrameId = window.requestAnimationFrame(renderResultLoop);
+        }
+    }
+
+    function stopResultLoop() {
+        if (resultAnimationFrameId) {
+            window.cancelAnimationFrame(resultAnimationFrameId);
+            resultAnimationFrameId = null;
+        }
     }
 
     function captureFrameBlob() {
@@ -187,11 +422,11 @@
             return Promise.resolve(null);
         }
 
-        const maxSide = 960;
-        const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+        const scale = Math.min(1, cameraFrameMaxSide / Math.max(sourceWidth, sourceHeight));
         captureCanvas.width = Math.max(1, Math.round(sourceWidth * scale));
         captureCanvas.height = Math.max(1, Math.round(sourceHeight * scale));
         captureContext.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+        renderRecognitionFrame();
 
         return new Promise((resolve) => {
             captureCanvas.toBlob(resolve, "image/jpeg", 0.85);
@@ -203,6 +438,7 @@
         window.clearTimeout(detectTimer);
         detectTimer = null;
         detecting = false;
+        stopWebRTCDetection();
         updateMonitorButton();
 
         if (resetView) {
@@ -211,7 +447,30 @@
         }
     }
 
-    let detectionTarget = "person";
+    function getNextDetectDelay(elapsedMs) {
+        const adaptiveDelay = Math.round((elapsedMs || lastRequestMs || 0) * 0.25);
+        return Math.max(minDetectDelay, Math.min(maxDetectDelay, adaptiveDelay));
+    }
+
+    function applyDetectionResult(data, requestStartedAt) {
+        lastDetection = data;
+        shouldResetBackendTracking = false;
+        lastRequestMs = Math.round(performance.now() - requestStartedAt);
+        const count = data.count !== undefined ? data.count : (data.person_count || 0);
+        personCountText.textContent = String(count);
+        const newTrackCount = data.new_track_count !== undefined ? data.new_track_count : updateTrackedTargets(data);
+        sessionTotalCount = data.total_unique_count !== undefined ? data.total_unique_count : (sessionTotalCount + newTrackCount);
+        if (totalCountText) totalCountText.textContent = String(sessionTotalCount);
+        const rawCount = data.raw_count !== undefined ? `，原始 ${data.raw_count}` : "";
+        const breakdown = data.detection_target === "both"
+            ? `，人 ${data.person_count || 0} / 车 ${data.vehicle_count || 0}`
+            : "";
+        const transportInfo = data.transport === "webrtc" ? "，WebRTC" : "，HTTP";
+        const trackerInfo = data.tracker_used ? "，跟踪开启" : (data.tracker_fallback ? "，跟踪回退" : "");
+        const uniqueInfo = `，新增 ${newTrackCount} / 已去重 ${sessionTotalCount}`;
+        detectMeta.textContent = `YOLO ${data.elapsed_ms || 0} ms / 总 ${lastRequestMs} ms${breakdown}${uniqueInfo}${transportInfo}${trackerInfo}${rawCount}`;
+        drawDetections(data);
+    }
 
     async function detectFrame() {
         if (!monitoring || detecting || !stream) {
@@ -219,7 +478,8 @@
         }
 
         detecting = true;
-        detectMeta.textContent = "正在检测当前画面...";
+        const requestStartedAt = performance.now();
+        detectMeta.textContent = lastDetection ? "后台更新检测中，保留上一帧标注..." : "正在检测当前画面...";
 
         try {
             const blob = await captureFrameBlob();
@@ -231,41 +491,65 @@
             const formData = new FormData();
             formData.append("frame", blob, "camera-frame.jpg");
             formData.append("target", detectionTarget);
+            formData.append("session_id", cameraSessionId);
+            formData.append("model_name", getSelectedYoloModel());
+            if (shouldResetBackendTracking) {
+                formData.append("reset_tracking", "1");
+            }
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), detectTimeoutMs);
 
-            const response = await fetch("/api/camera/detect", {
-                method: "POST",
-                body: formData,
-                cache: "no-store",
-            });
-            const data = await response.json();
+            let response;
+            let data;
+            try {
+                response = await fetch("/api/camera/detect", {
+                    method: "POST",
+                    body: formData,
+                    cache: "no-store",
+                    signal: controller.signal,
+                });
+                data = await response.json();
+            } finally {
+                window.clearTimeout(timeoutId);
+            }
 
             if (!response.ok || !data.success) {
                 throw new Error(data.error || "检测失败");
             }
 
-            lastDetection = data;
-            const count = data.count !== undefined ? data.count : (data.person_count || 0);
-            personCountText.textContent = String(count);
-            detectMeta.textContent = `YOLO 实时检测，耗时 ${data.elapsed_ms || 0} ms`;
-            drawDetections(data);
+            applyDetectionResult(data, requestStartedAt);
         } catch (error) {
-            detectMeta.textContent = error.message || "实时检测失败";
+            lastRequestMs = Math.round(performance.now() - requestStartedAt);
+            detectMeta.textContent = error.name === "AbortError" ? "本轮检测超时，已跳过" : (error.message || "实时检测失败");
         } finally {
             detecting = false;
             if (monitoring && stream) {
-                detectTimer = window.setTimeout(detectFrame, 200);
+                detectTimer = window.setTimeout(detectFrame, getNextDetectDelay(lastRequestMs));
             }
         }
     }
 
-    function startMonitoring() {
+    async function startMonitoring() {
         if (!stream || monitoring) {
             return;
         }
 
         monitoring = true;
         updateMonitorButton();
-        detectFrame();
+        try {
+            const started = await startWebRTCDetection();
+            if (!started) {
+                webRTCFallback = true;
+                detectFrame();
+            }
+        } catch (error) {
+            webRTCFallback = true;
+            await stopWebRTCDetection();
+            if (monitoring && stream) {
+                detectMeta.textContent = "WebRTC 不可用，已回退 HTTP 检测";
+                detectFrame();
+            }
+        }
     }
 
     function toggleMonitoring() {
@@ -280,12 +564,12 @@
     function stopCurrentStream() {
         stopRecording(false);
         stopMonitoring(true);
+        stopResultLoop();
         if (stream) {
             stream.getTracks().forEach((track) => track.stop());
         }
         stream = null;
         video.srcObject = null;
-        detectVideo.srcObject = null;
         updateMonitorButton();
         updateRecordButton();
     }
@@ -421,8 +705,17 @@
         }
 
         setStatus("正在请求权限...", "idle");
+        cameraSessionId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        resetSessionTotal();
         const selectedDeviceId = cameraSelect.value;
-        const videoConstraint = selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true;
+        const videoConstraint = {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30, max: 30 },
+        };
+        if (selectedDeviceId) {
+            videoConstraint.deviceId = { exact: selectedDeviceId };
+        }
 
         try {
             stream = await navigator.mediaDevices.getUserMedia({
@@ -431,12 +724,11 @@
             });
 
             video.srcObject = stream;
-            detectVideo.srcObject = stream;
-            await Promise.all([video.play(), detectVideo.play()]);
+            await video.play();
 
             setPlaceholder(false);
-            startButton.disabled = true;
-            stopButton.disabled = false;
+            startResultLoop();
+            updatePowerButton();
             monitorButton.disabled = false;
             targetToggleButton.disabled = false;
             recordButton.disabled = !window.MediaRecorder;
@@ -463,13 +755,135 @@
     function stopCamera() {
         stopCurrentStream();
         setPlaceholder(true);
-        startButton.disabled = devices.length === 0;
-        stopButton.disabled = true;
+        updatePowerButton();
         monitorButton.disabled = true;
+        targetToggleButton.disabled = true;
         recordButton.disabled = true;
         cameraSelect.disabled = devices.length === 0;
         hint.textContent = "浏览器会在开始时请求摄像头权限。";
         setStatus(devices.length > 0 ? "已停止" : "未检测到摄像头", devices.length > 0 ? "idle" : "error");
+    }
+
+    function togglePowerCamera() {
+        if (stream) {
+            stopCamera();
+        } else {
+            startCamera();
+        }
+    }
+
+    async function pollWebRTCResult() {
+        if (!webRTCActive || !cameraSessionId) {
+            return;
+        }
+
+        const requestStartedAt = performance.now();
+        try {
+            const response = await fetch(`/api/camera/webrtc/result?session_id=${encodeURIComponent(cameraSessionId)}`, {
+                cache: "no-store",
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || "WebRTC result failed");
+            }
+            if (data.pending || !data.sequence || data.sequence === lastWebRTCSequence) {
+                return;
+            }
+            lastWebRTCSequence = data.sequence;
+            applyDetectionResult(data, requestStartedAt);
+        } catch (error) {
+            detectMeta.textContent = error.message || "WebRTC result failed";
+        }
+    }
+
+    async function stopWebRTCDetection() {
+        webRTCActive = false;
+        window.clearInterval(webRTCResultTimer);
+        webRTCResultTimer = null;
+        lastWebRTCSequence = 0;
+
+        if (peerConnection) {
+            peerConnection.getSenders().forEach((sender) => {
+                if (sender.track) {
+                    peerConnection.removeTrack(sender);
+                }
+            });
+            peerConnection.close();
+            peerConnection = null;
+        }
+
+        if (cameraSessionId) {
+            try {
+                await fetch("/api/camera/webrtc/stop", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ session_id: cameraSessionId }),
+                    cache: "no-store",
+                });
+            } catch (error) {
+                // Best-effort cleanup only.
+            }
+        }
+    }
+
+    async function startWebRTCDetection() {
+        if (!window.RTCPeerConnection || !stream) {
+            return false;
+        }
+
+        await stopWebRTCDetection();
+        peerConnection = new RTCPeerConnection();
+        stream.getVideoTracks().forEach((track) => {
+            peerConnection.addTrack(track, stream);
+        });
+
+        const offer = await peerConnection.createOffer({
+            offerToReceiveAudio: false,
+            offerToReceiveVideo: false,
+        });
+        await peerConnection.setLocalDescription(offer);
+        await waitForIceGathering(peerConnection);
+
+        const response = await fetch("/api/camera/webrtc/offer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sdp: peerConnection.localDescription.sdp,
+                type: peerConnection.localDescription.type,
+                target: detectionTarget,
+                session_id: cameraSessionId,
+                reset_tracking: shouldResetBackendTracking,
+                model_name: getSelectedYoloModel(),
+            }),
+            cache: "no-store",
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || "WebRTC offer failed");
+        }
+
+        await peerConnection.setRemoteDescription(data.answer);
+        shouldResetBackendTracking = false;
+        webRTCActive = true;
+        webRTCFallback = false;
+        detectMeta.textContent = "WebRTC 实时检测已启动";
+        webRTCResultTimer = window.setInterval(pollWebRTCResult, 120);
+        return true;
+    }
+
+    function waitForIceGathering(connection) {
+        if (connection.iceGatheringState === "complete") {
+            return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+            const timeoutId = window.setTimeout(resolve, 3000);
+            connection.addEventListener("icegatheringstatechange", () => {
+                if (connection.iceGatheringState === "complete") {
+                    window.clearTimeout(timeoutId);
+                    resolve();
+                }
+            });
+        });
     }
 
     function handleCameraError(error) {
@@ -492,7 +906,7 @@
 
     async function init() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            startButton.disabled = true;
+            powerButton.disabled = true;
             recordButton.disabled = true;
             cameraSelect.disabled = true;
             setStatus("浏览器不支持", "error");
@@ -501,7 +915,7 @@
         }
 
         if (!isSecureCameraContext()) {
-            startButton.disabled = true;
+            powerButton.disabled = true;
             recordButton.disabled = true;
             cameraSelect.disabled = true;
             setStatus("需要安全环境", "error");
@@ -510,22 +924,35 @@
         }
 
         await refreshDevices();
-        startButton.disabled = devices.length === 0;
+        updatePowerButton();
+        updateTargetToggleButton();
+        syncCurrentYoloModel();
 
         navigator.mediaDevices.addEventListener("devicechange", async () => {
             await refreshDevices();
             if (!stream) {
-                startButton.disabled = devices.length === 0;
+                updatePowerButton();
                 cameraSelect.disabled = devices.length === 0;
             }
         });
     }
 
-    startButton.addEventListener("click", startCamera);
+    powerButton.addEventListener("click", togglePowerCamera);
     monitorButton.addEventListener("click", toggleMonitoring);
     targetToggleButton.addEventListener("click", toggleTarget);
     recordButton.addEventListener("click", toggleRecording);
-    stopButton.addEventListener("click", stopCamera);
+    if (yoloModelSelect) {
+        yoloModelSelect.addEventListener("change", async () => {
+            syncCurrentYoloModel();
+            resetTrackingState(true);
+            shouldResetBackendTracking = true;
+            if (monitoring && stream) {
+                await stopWebRTCDetection();
+                detectMeta.textContent = "模型已切换，正在重新检测...";
+                startMonitoring();
+            }
+        });
+    }
     window.addEventListener("beforeunload", () => {
         clearRecordingUrl();
         stopCurrentStream();
@@ -534,7 +961,8 @@
         if (lastDetection) {
             drawDetections(lastDetection);
         } else {
-            resizeOverlay();
+            resizeCanvas(recognitionCanvas, recognitionContext);
+            resizeCanvas(resultCanvas, resultContext);
         }
     });
 

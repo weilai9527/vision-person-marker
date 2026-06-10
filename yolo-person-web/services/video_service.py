@@ -64,6 +64,8 @@ def update_video_progress(video_id: int, **updates) -> None:
                 "sum_count": 0,
                 "detection_target": "person",
                 "message": "",
+                "eta_seconds": 0.0,
+                "processing_fps": 0.0,
             },
         )
         current.update(updates)
@@ -84,6 +86,8 @@ def get_video_progress(video_id: int) -> dict:
             "sum_count": 0,
             "detection_target": "person",
             "message": "",
+            "eta_seconds": 0.0,
+            "processing_fps": 0.0,
         }
         current = _progress.get(video_id, {})
         result = dict(defaults)
@@ -367,7 +371,8 @@ def process_video_detection(video_id: int) -> None:
 
     video_path = Path(record.video_path)
     output_path = VIDEO_RESULT_DIR / f"{uuid4().hex}.mp4"
-    model = get_yolo_model()
+    model_name = getattr(record, "yolo_model_name", "") or None
+    model = get_yolo_model(model_name)
     detection_target = getattr(record, "detection_target", "person") or "person"
     target_options = get_video_detection_target(detection_target)
     cap = cv2.VideoCapture(str(video_path))
@@ -383,6 +388,7 @@ def process_video_detection(video_id: int) -> None:
         current_frame=0,
         total_frames=record.total_frames or 0,
         detection_target=detection_target,
+        model_name=model_name,
         message="Processing video...",
     )
 
@@ -401,6 +407,7 @@ def process_video_detection(video_id: int) -> None:
     SMOOTH_MAX_MISS = 2
     SMOOTH_IOU_THRESHOLD = 0.5
 
+    start_time = time.time()
     try:
         source_fps = float(cap.get(cv2.CAP_PROP_FPS) or record.fps or 25)
         fps = VIDEO_TARGET_FPS if VIDEO_TARGET_FPS > 0 else source_fps
@@ -430,7 +437,7 @@ def process_video_detection(video_id: int) -> None:
                 "conf": YOLO_CONF,
                 "iou": YOLO_IOU,
                 "imgsz": YOLO_IMGSZ,
-                "max_det": 300,
+                "max_det": 1000,
                 "verbose": False,
             }
             device = resolve_yolo_device()
@@ -472,6 +479,11 @@ def process_video_detection(video_id: int) -> None:
                         progress = int(processed / record.total_frames * 100) if record.total_frames else 0
                         record.processed_frames = processed
                         db.session.commit()
+
+                        elapsed = now - start_time
+                        processing_fps = processed / elapsed if elapsed > 0 else 0.0
+                        eta_seconds = (record.total_frames - processed) / processing_fps if processing_fps > 0 and record.total_frames else 0.0
+
                         update_video_progress(
                             video_id,
                             status="processing",
@@ -485,6 +497,8 @@ def process_video_detection(video_id: int) -> None:
                             unique_count=len(unique_track_ids),
                             sum_count=sum(frame_person_counts),
                             detection_target=detection_target,
+                            eta_seconds=round(eta_seconds, 1),
+                            processing_fps=round(processing_fps, 1),
                             message=f"Processed {processed}/{record.total_frames or '?'} frames",
                         )
 
@@ -513,6 +527,8 @@ def process_video_detection(video_id: int) -> None:
             unique_count=len(unique_track_ids),
             sum_count=sum_count,
             detection_target=detection_target,
+            eta_seconds=0.0,
+            processing_fps=0.0,
             message="Processing complete",
         )
     except Exception as exc:
@@ -527,3 +543,6 @@ def process_video_detection(video_id: int) -> None:
         cap.release()
         if writer is not None:
             writer.release()
+        # 处理完成后清理内存中的进度缓存，防止长期运行内存泄漏
+        with _progress_lock:
+            _progress.pop(video_id, None)
